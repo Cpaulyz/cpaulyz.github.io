@@ -15,8 +15,6 @@ tags = [
 
 # Lab1 MapReduce
 
-[TOC]
-
 ## 0 简介
 
 Lab1实现了一个执行Wordcount任务的MapReduce，需要阅读论文[MapReduce](https://pdos.csail.mit.edu/6.824/papers/mapreduce.pdf)
