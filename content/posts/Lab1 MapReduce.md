@@ -2,9 +2,7 @@
 
 title = "MIT6.824 Lab1 MapReduce"
 
-date = "2022-01-27"
-
-description = "A brief description of Hugo Shortcodes"
+date = "2021-12-11"
 
 tags = [
     "MIT6.824",
