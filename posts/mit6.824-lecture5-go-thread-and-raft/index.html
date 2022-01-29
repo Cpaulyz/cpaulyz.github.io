@@ -1,0 +1,140 @@
+<!doctype html><html lang=en-us><head><title>MIT6.824 Lecture5 Go Thread and Raft | ChenYZ</title><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><meta name=viewport content="width=device-width,minimum-scale=1"><meta name=description content="Lecture5 Go Thread and Raft 讲义：http://nil.csail.mit.edu/6.824/2020/notes/l-go-concurrency.txt"><meta name=generator content="Hugo 0.64.0"><meta name=ROBOTS content="NOINDEX, NOFOLLOW"><link rel=stylesheet href=/css/style.css><link rel="shortcut icon" href=/images/favicon.ico type=image/x-icon><script type=application/javascript>var doNotTrack=false;if(!doNotTrack){window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;ga('create','your-google-analytics-id','auto');ga('send','pageview');}</script><script async src=https://www.google-analytics.com/analytics.js></script><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.css integrity=sha384-RZU/ijkSsFbcmivfdRBQDtwuwVqK7GMOw6IMvKyeWL2K5UAlyp6WonmB8m7Jd0Hn crossorigin=anonymous><script defer src=https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.js integrity=sha384-pK1WpvzWVBQiP0/GjnvRxV4mOb0oxFuyRxJlk6vVw146n3egcN5C925NCP7a7BY8 crossorigin=anonymous></script><script defer src=https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/contrib/auto-render.min.js integrity=sha384-vZTG03m+2yp6N6BNi5iM4rW4oIwk5DfcNdFfxkk9ZWpDriOkXX8voJBFrAO7MpVl crossorigin=anonymous onload=renderMathInElement(document.body);></script></head><body><nav class=navigation><a href=/><span class=arrow>←</span>Home</a>
+<a href=/posts>Archive</a>
+<a href=/tags>Tags</a>
+<a href=/about>About</a>
+<a class=button href=/index.xml>Subscribe</a></nav><main class=main><section id=single><h1 class=title>MIT6.824 Lecture5 Go Thread and Raft</h1><div class=tip><time datetime="2022-01-29 00:00:00 +0000 UTC">Jan 29, 2022</time>
+<span class=split>·</span>
+<span>wordCount</span>
+<span class=split>·</span>
+<span>2 minute read</span></div><aside class=toc><details><summary>Table of Contents</summary><div><nav id=TableOfContents><ul><li><a href=#go相关>Go相关</a><ul><li><a href=#closurewait-group>closure&wait group</a></li><li><a href=#mutex>Mutex</a></li><li><a href=#条件变量>条件变量</a></li><li><a href=#channel>channel</a></li></ul></li></ul></nav></div></details></aside><div class=content><h1 id=lecture5-go-thread-and-raft>Lecture5 Go Thread and Raft</h1><blockquote><p>讲义：http://nil.csail.mit.edu/6.824/2020/notes/l-go-concurrency.txt</p><p>视频：https://www.bilibili.com/video/BV1qk4y197bB?p=5</p><p>前半部分主要介绍Go并发相关知识，后半部分介绍raft lab的实现，只针对前半部分的一些内容做了摘要。</p></blockquote><h2 id=go相关>Go相关</h2><h3 id=closurewait-group>closure&wait group</h3><p>good</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>main</span>(){
+  <span style=color:#a2f;font-weight:700>var</span> wg sync.WaitGroup
+  <span style=color:#a2f;font-weight:700>for</span> i<span style=color:#666>:=</span><span style=color:#666>0</span>; i&lt; <span style=color:#666>5</span>; i<span style=color:#666>+</span> {
+		wg.<span style=color:#00a000>Add</span>(<span style=color:#666>1</span>)
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>(x <span style=color:#0b0;font-weight:700>int</span>) {
+			<span style=color:#00a000>sendRPC</span>(x)
+			wg.<span style=color:#00a000>Done</span>()
+		}
+  }
+	wg.<span style=color:#00a000>Wait</span>()
+}
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>sendRPC</span>(i <span style=color:#0b0;font-weight:700>int</span>){
+	<span style=color:#a2f>println</span>(i)
+}
+</code></pre></div><p>bad</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>main</span>() {
+	<span style=color:#a2f;font-weight:700>var</span> wg sync.WaitGroup
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#666>5</span>; i<span style=color:#666>++</span> {
+		wg.<span style=color:#00a000>Add</span>(<span style=color:#666>1</span>)
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>() {
+			<span style=color:#00a000>sendRPC</span>(i)
+			wg.<span style=color:#00a000>Done</span>()
+		}()
+	}
+	wg.<span style=color:#00a000>Wait</span>()
+}
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>sendRPC</span>(i <span style=color:#0b0;font-weight:700>int</span>) {
+	<span style=color:#a2f>println</span>(i)
+}
+</code></pre></div><h3 id=mutex>Mutex</h3><p>加锁，确保在关键代码区互斥</p><p>bad</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>import</span> <span style=color:#b44>&#34;time&#34;</span>
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>main</span>() {
+	counter <span style=color:#666>:=</span> <span style=color:#666>0</span>
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#666>1000</span>; i<span style=color:#666>++</span> {
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>() {
+			counter = counter <span style=color:#666>+</span> <span style=color:#666>1</span>
+		}()
+	}
+
+	time.<span style=color:#00a000>Sleep</span>(<span style=color:#666>1</span> <span style=color:#666>*</span> time.Second)
+	<span style=color:#a2f>println</span>(counter)
+}
+</code></pre></div><p>good</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>import</span> <span style=color:#b44>&#34;time&#34;</span>
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>main</span>() {
+	counter <span style=color:#666>:=</span> <span style=color:#666>0</span>
+	<span style=color:#a2f;font-weight:700>var</span> mu sync.Mutex
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#666>1000</span>; i<span style=color:#666>++</span> {
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>() {
+			mu.<span style=color:#00a000>Lock</span>()
+			<span style=color:#a2f;font-weight:700>defer</span> mu.<span style=color:#00a000>Unlock</span>()
+			counter = counter <span style=color:#666>+</span> <span style=color:#666>1</span>
+		}()
+	}
+
+	time.<span style=color:#00a000>Sleep</span>(<span style=color:#666>1</span> <span style=color:#666>*</span> time.Second)
+	mu.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f>println</span>(counter)
+	mu.<span style=color:#00a000>Unlock</span>()
+}
+</code></pre></div><h3 id=条件变量>条件变量</h3><ul><li><p><code>func NewCond(l Locker) *Cond</code></p><p>使⽤锁 I 创建一个 *Cond。 Cond条件变量，总是要和锁结合使用。</p></li><li><p><code>func (c *Cond) Broadcast()</code></p><p>Broadcast唤醒所有等待c的线程。调⽤者在调⽤本⽅法时，建议（但并⾮必须）保持c.L的锁定。</p></li><li><p><code>func (c *Cond) Signal()</code></p><p>Signal唤醒等待c的⼀个线程（如果存在）。调⽤者在调⽤本⽅法时，建议（但并⾮必须）保持c.L的锁定。 发送通知给⼀个⼈。</p></li><li><p><code>func (c *Cond) Wait()</code></p><p>a) Wait⾃⾏解锁c.L并阻塞当前线程，在之后线程恢复执⾏时， Wait⽅法会在返回前锁定c.L。和其他系统不同， Wait除⾮被Broadcast或者Signal唤醒，不会主动返回。 ⼴播给所有⼈。</p><p>b) 因为线程中Wait⽅法是第⼀个恢复执⾏的，⽽此时c.L未加锁。调⽤者不应假设Wait恢复时条件已满⾜，相反，调⽤者应在循环中等待。</p></li></ul><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>import</span> <span style=color:#b44>&#34;sync&#34;</span>
+<span style=color:#a2f;font-weight:700>import</span> <span style=color:#b44>&#34;time&#34;</span>
+<span style=color:#a2f;font-weight:700>import</span> <span style=color:#b44>&#34;math/rand&#34;</span>
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>main</span>() {
+	rand.<span style=color:#00a000>Seed</span>(time.<span style=color:#00a000>Now</span>().<span style=color:#00a000>UnixNano</span>())
+
+	count <span style=color:#666>:=</span> <span style=color:#666>0</span>
+	finished <span style=color:#666>:=</span> <span style=color:#666>0</span>
+	<span style=color:#a2f;font-weight:700>var</span> mu sync.Mutex
+	cond <span style=color:#666>:=</span> sync.<span style=color:#00a000>NewCond</span>(<span style=color:#666>&amp;</span>mu)
+
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#666>10</span>; i<span style=color:#666>++</span> {
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>() {
+			vote <span style=color:#666>:=</span> <span style=color:#00a000>requestVote</span>()
+			mu.<span style=color:#00a000>Lock</span>()
+			<span style=color:#a2f;font-weight:700>defer</span> mu.<span style=color:#00a000>Unlock</span>()
+			<span style=color:#a2f;font-weight:700>if</span> vote {
+				count<span style=color:#666>++</span>
+			}
+			finished<span style=color:#666>++</span>
+			cond.<span style=color:#00a000>Broadcast</span>()
+		}()
+	}
+
+	mu.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f;font-weight:700>for</span> count &lt; <span style=color:#666>5</span> <span style=color:#666>&amp;&amp;</span> finished <span style=color:#666>!=</span> <span style=color:#666>10</span> {
+		cond.<span style=color:#00a000>Wait</span>()
+	}
+	<span style=color:#a2f;font-weight:700>if</span> count <span style=color:#666>&gt;=</span> <span style=color:#666>5</span> {
+		<span style=color:#a2f>println</span>(<span style=color:#b44>&#34;received 5+ votes!&#34;</span>)
+	} <span style=color:#a2f;font-weight:700>else</span> {
+		<span style=color:#a2f>println</span>(<span style=color:#b44>&#34;lost&#34;</span>)
+	}
+	mu.<span style=color:#00a000>Unlock</span>()
+}
+</code></pre></div><p>pattern</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go>mu.<span style=color:#00a000>Lock</span>()
+<span style=color:#080;font-style:italic>// do something that might affect the condition
+</span><span style=color:#080;font-style:italic></span>cond.<span style=color:#00a000>Broadcast</span>() <span style=color:#080;font-style:italic>// or.signal() wake up one thread
+</span><span style=color:#080;font-style:italic></span>mu.<span style=color:#00a000>Unlock</span>()
+
+<span style=color:#666>--</span><span style=color:#666>--</span>
+
+mu.<span style=color:#00a000>Lock</span>()
+while condition <span style=color:#666>==</span> <span style=color:#a2f;font-weight:700>false</span> {
+	cond.<span style=color:#00a000>Wait</span>()
+}
+<span style=color:#080;font-style:italic>// now condition is true, and we have the lock
+</span><span style=color:#080;font-style:italic></span>mu.<span style=color:#00a000>Unlock</span>()
+</code></pre></div><p>Broadcast和signal的效果其实差不多，broadcast唤醒所有等待者，signal只唤醒一个。signal也许可以提高一些性能。</p><h3 id=channel>channel</h3><p>可以用作wait group</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>package</span> main
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>main</span>() {
+	done <span style=color:#666>:=</span> <span style=color:#a2f>make</span>(<span style=color:#a2f;font-weight:700>chan</span> <span style=color:#0b0;font-weight:700>bool</span>)
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#666>5</span>; i<span style=color:#666>++</span> {
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>(x <span style=color:#0b0;font-weight:700>int</span>) {
+			<span style=color:#00a000>sendRPC</span>(x)
+			done <span style=color:#666>&lt;-</span> <span style=color:#a2f;font-weight:700>true</span>
+		}(i)
+	}
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#666>5</span>; i<span style=color:#666>++</span> {
+		<span style=color:#666>&lt;-</span>done
+	}
+}
+
+<span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>sendRPC</span>(i <span style=color:#0b0;font-weight:700>int</span>) {
+	<span style=color:#a2f>println</span>(i)
+}
+</code></pre></div><p>代码中应该避免使用带buffer的chan，除非有非常清晰的目的。</p></div><div class=tags><a href=tags/mit6.824>MIT6.824</a>
+<a href=tags/distributed-system>distributed system</a></div></section></main><footer id=footer><div id=social><a class=symbol href=https://github.com/Cpaulyz rel=me target=_blank><svg fill="#bbb" width="28" height="28" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><title>Github</title><desc>Created with Sketch.</desc><defs/><g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"><g id="Social-Icons---Rounded-Black" transform="translate(-264.000000, -939.000000)"><g id="Github" transform="translate(264.000000, 939.000000)"><path d="M8 72H64C68.418278 72 72 68.418278 72 64V8c0-4.418278-3.581721999999999-8-8-8H8c-4.418278 811624501e-24-8 3.581722-8 8V64C541083001e-24 68.418278 3.581722 72 8 72z" id="Rounded" fill="#bbb"/><path d="M35.9985 13C22.746 13 12 23.7870921 12 37.096644 12 47.7406712 18.876 56.7718301 28.4145 59.9584121 29.6145 60.1797862 30.0525 59.4358488 30.0525 58.7973276 30.0525 58.2250681 30.0315 56.7100863 30.0195 54.6996482 23.343 56.1558981 21.9345 51.4693938 21.9345 51.4693938 20.844 48.6864054 19.2705 47.9454799 19.2705 47.9454799 17.091 46.4500754 19.4355 46.4801943 19.4355 46.4801943 21.843 46.6503662 23.1105 48.9634994 23.1105 48.9634994 25.2525 52.6455377 28.728 51.5823398 30.096 50.9649018 30.3135 49.4077535 30.9345 48.3460615 31.62 47.7436831 26.2905 47.1352808 20.688 45.0691228 20.688 35.8361671 20.688 33.2052792 21.6225 31.0547881 23.1585 29.3696344 22.911 28.7597262 22.0875 26.3110578 23.3925 22.9934585 23.3925 22.9934585 25.4085 22.3459017 29.9925 25.4632101 31.908 24.9285993 33.96 24.6620468 36.0015 24.6515052 38.04 24.6620468 40.0935 24.9285993 42.0105 25.4632101 46.5915 22.3459017 48.603 22.9934585 48.603 22.9934585 49.9125 26.3110578 49.089 28.7597262 48.8415 29.3696344 50.3805 31.0547881 51.309 33.2052792 51.309 35.8361671 51.309 45.0917119 45.6975 47.1292571 40.3515 47.7256117 41.2125 48.4695491 41.9805 49.9393525 41.9805 52.1877301 41.9805 55.4089489 41.9505 58.0067059 41.9505 58.7973276 41.9505 59.4418726 42.3825 60.1918338 43.6005 59.9554002 53.13 56.7627944 60 47.7376593 60 37.096644 60 23.7870921 49.254 13 35.9985 13" fill="#fff"/></g></g></g></svg></a></div><div class=copyright>© Copyright
+2022
+<span class=split><svg fill="#bbb" width="15" height="15" id="heart-15" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 15 15"><path d="M13.91 6.75c-1.17 2.25-4.3 5.31-6.07 6.94-.1903.1718-.4797.1718-.67.0C5.39 12.06 2.26 9 1.09 6.75-1.48 1.8 5-1.5 7.5 3.45 10-1.5 16.48 1.8 13.91 6.75z"/></svg></span>cpaulyz</div><div class=powerby>Powered by <a href=http://www.gohugo.io/>Hugo</a> Theme By <a href=https://github.com/nodejh/hugo-theme-cactus-plus>nodejh</a></div></footer></body></html>
