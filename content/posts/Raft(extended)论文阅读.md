@@ -2,7 +2,7 @@
 
 title = "Raft(extended)论文阅读"
 
-date = "2022-01-29"
+date = "2022-01-30"
 
 tags = [
     "MIT6.824",
@@ -52,12 +52,10 @@ Raft 在许多方面类似于现有的一致性算法（尤其是 Oki 和 Liskov
 ## 2 复制状态机
 
 * **原理**：任何初始状态一样的状态机，如果执行的命令序列一样，则最终达到的状态也一样。如果将此特性应用在多参与者进行协商共识上，可以理解为系统中存在多个具有完全相同的状态机（参与者），这些状态机能最终保持一致的关键就是起始状态完全一致和执行命令序列完全一致。
-
 * **作用**：解决分布式系统中的各种容错问题，例如一组服务器上存在状态机计算相同状态的相同副本，并且即使某些服务器宕机，也可以继续运行。
-
 * **实现**：通常使用复制日志实现。每个服务器存储一个包含一系列命令的日志，每个日志中命令都相同并且顺序也一样，因此每个状态机处理相同的命令序列，从而能得到相同的状态和相同的输出序列。
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129150357888.png" alt="image-20220129150357888" style="zoom:50%;" />
+![image-20220129150357888](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129150357888.png)
 
 用于保证复制日志的一致性的算法就叫做共识算法，共识算法就是用来确保每个节点上的日志顺序都是一致的。
 
@@ -116,7 +114,7 @@ paxos存在两个巨大的缺点
 - `Candidate`：leader 选举过程中的临时角色，由 follower 转化而来，发起投票参与竞选。
 - `Follower`：接受 leader 的心跳和日志同步数据，投票给 candidate。Follower都是被动的，他们不会发送任何请求，只是简单的响应来自 leader 和 candidate 的请求
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129185156907.png" alt="image-20220129185156907" style="zoom:50%;" />
+![image-20220129185156907](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129185156907.png)
 
 #### 5.1.2 任期Term
 
@@ -126,7 +124,7 @@ paxos存在两个巨大的缺点
 * 在某些情况下，一次选举无法选出 leader 。在这种情况下，这一任期会以没有 leader 结束；一个新的任期（包含一次新的选举）会很快重新开始。
 * Raft 保证了在任意一个任期内，最多只有一个 leader 。
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129185454952.png" alt="image-20220129185454952" style="zoom:50%;" />
+![image-20220129185454952](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129185454952.png)
 
 term在raft中充当逻辑时钟的角色，每一个服务器节点存储一个当前任期号，服务器之间通信的时候会交换当前任期号：
 
@@ -174,7 +172,7 @@ Raft 算法中服务器节点之间使用 RPC 进行通信，并且基本的一�
 > - `entry`：Raft 中，将每一个事件都称为一个 entry，每一个 entry 都有一个表明它在 log 中位置的 index（之所以从 1 开始是为了方便 `prevLogIndex` 从 0 开始）。只有 leader 可以创建 entry。entry 的内容为 `<term, index, cmd>`，其中 cmd 是可以应用到状态机的操作。在 raft 组大部分节点都接收这条 entry 后，entry 可以被称为是 committed 的。
 > - `log`：由 entry 构成的数组，只有 leader 可以改变其他节点的 log。 entry 总是先被 leader 添加进本地的 log 数组中去，然后才发起共识请求，获得 quorum 同意后才会被 leader 提交给状态机。follower 只能从 leader 获取新日志和当前的 commitIndex，然后应用对应的 entry 到自己的状态机。
 >
-> <img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129223941102.png" alt="image-20220129223941102" style="zoom:50%;" />
+> ![image-20220129223941102](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129223941102.png)
 
 客户端请求 ➡️ Leader 把该指令作为一个新的条目追加到日志中去 ➡️ 并行的发起 AppendEntries RPC 给其他的服务器 ➡️ follower复制该条目 ➡️ 当该条目被过半服务器 ➡️ leader commit该条目并在状态机执行该指令 ➡️ 把执行的结果返回给客户端
 
@@ -195,7 +193,7 @@ Raft 算法中服务器节点之间使用 RPC 进行通信，并且基本的一�
 
 > 问题：为什么需要一致性检查？因为有些时候 follower 的日志可能和新的 leader 的日志不同，Follower 可能缺少一些在新 leader 中有的日志条目，也可能拥有一些新 leader 没有的日志条目，或者同时发生。缺失或多出日志条目的情况可能会涉及到多个任期。
 >
-> <img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129224619229.png" alt="image-20220129224619229" style="zoom:50%;" />
+> ![image-20220129224619229](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220129224619229.png)
 >
 > > 当一个 leader 成功当选时（最上面那条日志），follower 可能是（a-f）中的任何情况。
 > >
@@ -236,11 +234,11 @@ Raft中，日志条目的传送是单向的，只从 leader 到 follower，并�
 >
 > 个人认为可能存在这样一种边界条件
 >
-> <img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220131132501716.png" alt="image-20220131132501716" style="zoom:50%;" />
+> ![mage-20220131132501716](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220131132501716.png)
 >
 > commitIndex应该是3，但是在s2、s3更新commitIndex到3前，s1、s2宕机了
 >
-> <img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220131132554232.png" alt="image-20220131132554232" style="zoom:50%;" />
+> ![image-20220131132554232](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220131132554232.png)
 >
 > 此时s3、s4的commitIndex可能都是2，如果比较CommitIndex的话s4可能当选。但正确的结果应该是s3当选，这样才能保证理应commit的（index=3，term=1）最终在s3当选以后会被复制到s4、s5以后commit
 
@@ -248,7 +246,7 @@ Raft中，日志条目的传送是单向的，只从 leader 到 follower，并�
 
 这一部分使用反证法来证明Leader Completeness
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220131133350193.png" alt="image-20220131133350193" style="zoom:50%;" />
+![image-20220131133350193](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220131133350193.png)
 
 假设 leader 完整性特性是不满足的，然后我们推出矛盾来。假设任期 T 的 leader（leader T）在任期内提交了一个日志条目，但是该日志条目没有被存储到未来某些任期的 leader 中。假设 U 是大于 T 的没有存储该日志条目的最小任期号。
 
@@ -313,7 +311,7 @@ joint consensus 指的是包含新／旧配置文件全部节点的中间状态�
 
 其中，配置文件的变更用特殊的log entry实现，一旦某个服务器将该新配置日志条目增加到自己的日志中，它就会用该配置来做出未来所有的决策（无论该配置日志是否已经被提交）。这就意味着 leader 会使用 `C-old,new` 的规则来决定` C-old,new` 的日志条目是什么时候被提交的-
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220205171543631.png" alt="image-20220205171543631" style="zoom:50%;" />
+![image-20220205171543631](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220205171543631.png)
 
 图中有几个关键的时间点：
 
@@ -328,11 +326,11 @@ joint consensus 指的是包含新／旧配置文件全部节点的中间状态�
 
 * Raft 在配置变更前引入了一个额外的阶段，在该阶段，新的服务器以没有投票权身份加入到集群中来（leader 也复制日志给它们，但是考虑过半的时候不用考虑它们）。一旦该新的服务器追赶上了集群中的其他机器，配置变更就可以按上面描述的方式进行。
 
-**第二个问题：**集群的 leader 可能不是新配置中的一员。
+**第二个问题**：集群的 leader 可能不是新配置中的一员。
 
 * leader 一旦提交了 C-new 日志条目就会退位（回到 follower 状态）
 
-**第三个问题：**那些被移除的服务器（不在 C-new 中）可能会扰乱集群。这些服务器将不会再接收到心跳，所以当选举超时，它们就会进行新的选举过程。它们会发送带有新任期号的 RequestVote RPCs ，这样会导致当前的 leader 回到 follower 状态。新的 leader 最终会被选出来，但是被移除的服务器将会再次超时，然后这个过程会再次重复，导致系统可用性很差。
+**第三个问题**：那些被移除的服务器（不在 C-new 中）可能会扰乱集群。这些服务器将不会再接收到心跳，所以当选举超时，它们就会进行新的选举过程。它们会发送带有新任期号的 RequestVote RPCs ，这样会导致当前的 leader 回到 follower 状态。新的 leader 最终会被选出来，但是被移除的服务器将会再次超时，然后这个过程会再次重复，导致系统可用性很差。
 
 * 方案一：当服务器在最小选举超时时间内收到一个 RequestVote RPC，它不会更新任期号或者投票。
 * 方案二：[预投票](https://tanxinyu.work/raft/#%E9%A2%84%E6%8A%95%E7%A5%A8)
@@ -346,7 +344,7 @@ joint consensus 指的是包含新／旧配置文件全部节点的中间状态�
 
 使用 snapshot 技术可以对日志进行压缩
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220205172948584.png" alt="image-20220205172948584" style="zoom:50%;" />
+![image-20220205172948584](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220205172948584.png)
 
 快照内容包括：
 
@@ -360,7 +358,7 @@ joint consensus 指的是包含新／旧配置文件全部节点的中间状态�
 
 > follower 拿到非过期的 snapshot 之后直接覆盖本地所有状态即可，不需要留有部分 entry，也不会出现 snapshot 之后还存在有效的 entry。因此 follower 只需要判断 `InstallSnapshot RPC` 是否过期即可。过期则直接丢弃，否则直接替换全部状态即可。
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220205174902773.png" alt="image-20220205174902773" style="zoom:50%;" />
+![mage-20220205174902773](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220205174902773.png)
 
 两个性能问题：
 

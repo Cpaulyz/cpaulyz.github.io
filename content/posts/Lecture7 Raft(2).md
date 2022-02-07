@@ -67,8 +67,6 @@ InstallSnapshotRPC
 
 
 
-
-
 ## 线性一致性Linearizability
 
 什么是正确的？
@@ -77,12 +75,14 @@ InstallSnapshotRPC
 
 * 例一：
 
-  <img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207172731854.png" alt="image-20220207172731854" style="zoom:50%;" />
 
-  满足线性一致性
+<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207172731854.png" alt="image-20220207172731854" style="zoom:50%;" />
+
+满足线性一致性
 
 * 例二：
 
-  <img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207173049085.png" alt="image-20220207173049085" style="zoom:50%;" />
 
-  存在环，不满足线性一致性
+<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207173049085.png" alt="image-20220207173049085" style="zoom:50%;" />
+
+存在环，不满足线性一致性
