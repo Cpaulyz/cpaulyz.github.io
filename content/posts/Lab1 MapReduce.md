@@ -112,7 +112,7 @@ func CallExample() {
 
 ### 3.1 Task分配
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207164116656.png" alt="image-20211207164116656" style="zoom: 67%;" />
+![image-20211207164116656](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207164116656.png)
 
 根据hint我们可以得到一些启发——该实验可以从Task的分配入手
 
@@ -300,15 +300,15 @@ func MakeMaster(files []string, nReduce int) *Master {
 
 至此，我们尝试运行，手动起master和worker，应该可以看到worker被不断分配任务
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207163339328.png" alt="image-20211207163339328" style="zoom: 50%;" />
+![image-20211207163339328](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207163339328.png)
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207163424466.png" alt="image-20211207163424466" style="zoom:50%;" />
+![image-20211207163424466](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207163424466.png)
 
 但此时的`generateTask`方法仍有问题，注意到一旦所有的MapStatus都为InProcess时，mapDone仍然为false，此时会陷入死循环，这就需要我们在后续让worker运行被分配的mapTask，并在完成后回调给master，通知master修改状态。
 
 ### 3.2 Map流程
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207164052007.png" alt="image-20211207164052007" style="zoom: 67%;" />
+![image-20211207164052007](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207164052007.png)
 
 上文说道，worker被分配了map task，此时我们需要执行map task，并将中间结果写入local disks
 
@@ -472,11 +472,11 @@ func (m *Master) ReportWorkerTaskHandle(arg *ReportTaskArgs, reply *ReportTaskRe
 
 至此，我们尝试运行，手动起master和worker，应该可以看到worker被不断分配任务，在完成map task后会被继续分配reduce task，并且我们能在main文件夹中看到中间文件的生成
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207165216460.png" alt="image-20211207165216460" style="zoom:50%;" />
+![image-20211207165216460](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207165216460.png)
 
 ### 3.3 Reduce流程
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207165320168.png" alt="image-20211207165320168" style="zoom: 67%;" />
+![image-20211207165320168](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207165320168.png)
 
 Reduce部分比较简单，和Map流程类似，我们只需要定义一个DoReduce的过程，并且在reduce完成后一样以RPC的方式通知master即可，最终输出的文件名称要按照实验手册中的严格给出
 
@@ -535,7 +535,7 @@ func (task *WorkerTask) DoReduce() {
 
 至此，我们尝试运行，手动起master和worker，在完成reduce task后我们能在main文件夹中看到最终文件的生成
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207165718766.png" alt="image-20211207165718766" style="zoom:50%;" />
+![image-20211207165718766](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211207165718766.png)
 
 ### 3.4 跑起来
 
@@ -908,4 +908,4 @@ then
 fi
 ```
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211209000649695.png" alt="image-20211209000649695" style="zoom: 50%;" />
+![image-20211209000649695](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20211209000649695.png)

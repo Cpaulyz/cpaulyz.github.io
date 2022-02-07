@@ -76,13 +76,13 @@ InstallSnapshotRPC
 * 例一：
 
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207172731854.png" alt="image-20220207172731854" style="zoom:50%;" />
+![image-20220207172731854](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207172731854.png)
 
 满足线性一致性
 
 * 例二：
 
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207173049085.png" alt="image-20220207173049085" style="zoom:50%;" />
+![image-20220207173049085](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207173049085.png)
 
 存在环，不满足线性一致性

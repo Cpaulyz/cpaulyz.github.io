@@ -38,11 +38,11 @@ tags = [
 
 脑裂会导致一些问题，比如在以下的网络拓扑中，s1、s2是两个test-and-set服务，我们要求能够容错
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220201134936468.png" alt="image-20220201134936468" style="zoom:50%;" />
+![image-20220201134936468](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220201134936468.png)
 
 假设网络出现故障，c1只能和s1通信，c2只能和s2通信
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220201135020858.png" alt="image-20220201135020858" style="zoom:50%;" />
+![image-20220201135020858](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220201135020858.png)
 
 要么等待两个服务器响应，那么这个时候就没有容错能力；
 

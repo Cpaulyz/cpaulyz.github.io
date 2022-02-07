@@ -65,7 +65,7 @@ tags = [
 
 ### 2 Basic FT Design
 
-<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220117150719465.png" alt="image-20220117150719465" style="zoom:33%;" />
+![image-20220117150719465](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220117150719465.png)
 
 * 在不同的物理机上运行primary VM和backup VM，虚拟机的虚拟磁盘在共享存储上
 * primary VM接收到的操作会通过logging channel转发给backup VM，对于非确定性的操作，还将发送额外的信息，确保备机以确定性的方式执行这些操作。

@@ -64,7 +64,7 @@ LAB1：http://nil.csail.mit.edu/6.824/2020/labs/lab-mr.html
 
 * wordcount
 
-	<img src="https://cyzblog.oss-cn-beijing.aliyuncs.com/image-20211001223023114.png" alt="image-20211001223023114" style="zoom: 67%;" />
+	![image-20211001223023114](https://cyzblog.oss-cn-beijing.aliyuncs.com/image-20211001223023114.png)
 
 ### Implementation
 
