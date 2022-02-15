@@ -29,9 +29,9 @@ Raft的核心思想：在选举时保证成为leader的节点一定有**最新**
 
 2. 或者，候选人最后一条Log条目的任期号**等于**本地最后一条Log条目的任期号，且候选人的Log记录长度**大于等于**本地Log记录的长度
 
-## 快速备份
+## 快速回退
 
-如果Log有冲突，Leader每次会回退一条Log条目。但如果冲突较多，开销会很大，这里Morris教授总结了几个快速备份的方法。
+如果Log有冲突，Leader每次会回退一条Log条目。但如果冲突较多，开销会很大，这里Morris教授总结了几个快速回退的方法。
 
 ![image-20220207140153794](https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220207140153794.png)
 
@@ -43,7 +43,7 @@ Raft的核心思想：在选举时保证成为leader的节点一定有**最新**
 - XIndex：这个是Follower中，对应任期号为XTerm的第一条Log条目的槽位号。
 - XLen：如果Follower在对应位置没有Log，那么XTerm会返回-1，XLen表示Follower log的长度。
 
-用快速备份来解决上述三个case
+用快速回退来解决上述三个case
 
 * case1：Follower（S1）会返回XTerm=5，XIndex=2。Leader（S2）发现自己没有任期5的日志，它会将自己本地记录的，S1的nextIndex设置到XIndex。
 
