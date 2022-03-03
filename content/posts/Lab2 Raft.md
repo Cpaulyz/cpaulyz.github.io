@@ -1,4 +1,4 @@
-----
++++
 
 title = "MIT6.824 Lab2 Raft"
 
