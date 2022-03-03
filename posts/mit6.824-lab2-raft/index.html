@@ -1,0 +1,677 @@
+<!doctype html><html lang=en-us><head><title>MIT6.824 Lab2 Raft | ChenYZ</title><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><meta name=viewport content="width=device-width,minimum-scale=1"><meta name=description content="Lab2 Raft 讲义：http://nil.csail.mit.edu/6.824/2020/labs/lab-raft.html 阅读材料： students-guide-to-raft advice about locking and structure"><meta name=generator content="Hugo 0.64.0"><meta name=ROBOTS content="NOINDEX, NOFOLLOW"><link rel=stylesheet href=/css/style.css><link rel="shortcut icon" href=/images/favicon.ico type=image/x-icon><script type=application/javascript>var doNotTrack=false;if(!doNotTrack){window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;ga('create','your-google-analytics-id','auto');ga('send','pageview');}</script><script async src=https://www.google-analytics.com/analytics.js></script><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.css integrity=sha384-RZU/ijkSsFbcmivfdRBQDtwuwVqK7GMOw6IMvKyeWL2K5UAlyp6WonmB8m7Jd0Hn crossorigin=anonymous><script defer src=https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.js integrity=sha384-pK1WpvzWVBQiP0/GjnvRxV4mOb0oxFuyRxJlk6vVw146n3egcN5C925NCP7a7BY8 crossorigin=anonymous></script><script defer src=https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/contrib/auto-render.min.js integrity=sha384-vZTG03m+2yp6N6BNi5iM4rW4oIwk5DfcNdFfxkk9ZWpDriOkXX8voJBFrAO7MpVl crossorigin=anonymous onload=renderMathInElement(document.body);></script></head><body><nav class=navigation><a href=/><span class=arrow>←</span>Home</a>
+<a href=/posts>Archive</a>
+<a href=/tags>Tags</a>
+<a href=/about>About</a>
+<a class=button href=/index.xml>Subscribe</a></nav><main class=main><section id=single><h1 class=title>MIT6.824 Lab2 Raft</h1><div class=tip><time datetime="2022-02-27 00:00:00 +0000 UTC">Feb 27, 2022</time>
+<span class=split>·</span>
+<span>wordCount</span>
+<span class=split>·</span>
+<span>15 minute read</span></div><aside class=toc><details><summary>Table of Contents</summary><div><nav id=TableOfContents><ul><li><a href=#0-准备工作>0 准备工作</a><ul><li><a href=#01-论文与阅读材料>0.1 论文与阅读材料</a></li><li><a href=#02-debug>0.2 Debug</a></li><li><a href=#03-测试脚本>0.3 测试脚本</a></li></ul></li><li><a href=#1-parta-选举>1 PartA-选举</a><ul><li><a href=#11-测试分析>1.1 测试分析</a></li><li><a href=#12-定义>1.2 定义</a></li><li><a href=#13-requestvote-prc>1.3 RequestVote PRC</a></li><li><a href=#14-状态机与ticket协程>1.4 状态机与ticket协程</a></li><li><a href=#15-总结>1.5 总结</a></li></ul></li><li><a href=#2-partb-日志复制>2 PartB-日志复制</a><ul><li><a href=#21-测试分析>2.1 测试分析</a></li><li><a href=#22-leader-append-日志>2.2 Leader Append 日志</a></li><li><a href=#23-appendentries-rpc>2.3 AppendEntries RPC</a></li><li><a href=#24-广播>2.4 广播</a></li><li><a href=#25-日志提交>2.5 日志提交</a></li><li><a href=#26-测试踩坑优化总结>2.6 测试踩坑&优化&总结</a></li></ul></li><li><a href=#3-partc-持久化>3 PartC-持久化</a></li><li><a href=#总结-1>总结</a></li></ul></nav></div></details></aside><div class=content><h1 id=lab2-raft>Lab2 Raft</h1><blockquote><p>讲义：http://nil.csail.mit.edu/6.824/2020/labs/lab-raft.html</p><p>阅读材料：</p><ul><li><a href=https://thesquareplanet.com/blog/students-guide-to-raft/ target=_blank rel=noopener>students-guide-to-raft</a></li><li>advice about <a href=http://nil.csail.mit.edu/6.824/2020/labs/raft-locking.txt target=_blank rel=noopener>locking</a> and <a href=http://nil.csail.mit.edu/6.824/2020/labs/raft-structure.txt target=_blank rel=noopener>structure</a> for concurrency</li><li><a href=https://zhuanlan.zhihu.com/p/110168818 target=_blank rel=noopener>如何才能更好的学习 MIT 6.824 ？</a></li></ul><p>实现参考：https://mp.weixin.qq.com/s/djjfz2oGosoj7fChEe9AdQ</p></blockquote><h2 id=0-准备工作>0 准备工作</h2><h3 id=01-论文与阅读材料>0.1 论文与阅读材料</h3><p>在动手写代码之前，一定要仔细阅读论文和阅读材料。在实现的过程中，遇到的很多问题都可以在论文和阅读材料中找到答案。</p><p>论文的图2为本实验的一个重要参考</p><blockquote><p>⚠️实现的过程除了各个RPC下的implementation，右下角的Rules for Servers也需要考虑！</p></blockquote><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220211164949915.png alt=image-20220211164949915></p></p><h3 id=02-debug>0.2 Debug</h3><p>由于是分布式系统，可以在函数的关键位置打印日志来进行debug。</p><p>Lab为我们在<code>util.go</code>中提供了一个<code>DPrintf</code>工具，但个人建议对其再进行一层封装，可以打印Raft节点状态信息以及日志内容。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>printf</span>(format <span style=color:#0b0;font-weight:700>string</span>, a <span style=color:#666>...</span><span style=color:#a2f;font-weight:700>interface</span>{}) {
+	s <span style=color:#666>:=</span> fmt.<span style=color:#00a000>Sprintf</span>(<span style=color:#b44>&#34;[%d,term=%d,role=%v] %s&#34;</span>, rf.me<span style=color:#666>+</span><span style=color:#666>1</span>, rf.currentTerm, rf.role, format)
+	<span style=color:#00a000>DPrintf</span>(s, a<span style=color:#666>...</span>)
+}
+</code></pre></div><p>使用时，只需要将<code>util.go</code>中的<code>Debug</code>设为1，即可打印日志，如下：</p><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220215230058223.png alt=image-20220215230058223></p></p><h3 id=03-测试脚本>0.3 测试脚本</h3><p>由于是分布式系统，测试随机性较大，因此我写了一个简单的测试脚本，可用于循环多次测试，保证没有Bug遗漏。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-shell data-lang=shell><span style=color:#080>#!/bin/sh
+</span><span style=color:#080></span><span style=color:#b8860b>str2</span><span style=color:#666>=</span><span style=color:#b44>&#34;PASS&#34;</span>
+<span style=color:#a2f>read</span> -p <span style=color:#b44>&#34;Enter loop times&gt;&#34;</span> loop_time
+<span style=color:#a2f>read</span> -p <span style=color:#b44>&#34;Which part want to test?(A/B/C)&gt;&#34;</span> part
+<span style=color:#b8860b>i</span><span style=color:#666>=</span><span style=color:#666>0</span>
+<span style=color:#b8860b>success</span><span style=color:#666>=</span><span style=color:#a2f>true</span>
+
+<span style=color:#a2f;font-weight:700>while</span> <span style=color:#666>[</span> <span style=color:#b8860b>$i</span> -lt <span style=color:#b8860b>$loop_time</span> <span style=color:#666>]</span>
+<span style=color:#a2f;font-weight:700>do</span>
+  <span style=color:#a2f>let</span> <span style=color:#b44>&#39;i++&#39;</span>
+  go <span style=color:#a2f>test</span> -run 2<span style=color:#b44>&#34;</span><span style=color:#b8860b>$part</span><span style=color:#b44>&#34;</span>  &gt; test.log
+  <span style=color:#b8860b>result</span><span style=color:#666>=</span><span style=color:#a2f;font-weight:700>$(</span>tail -n <span style=color:#666>2</span> test.log | head -1<span style=color:#a2f;font-weight:700>)</span>
+  <span style=color:#a2f;font-weight:700>if</span> <span style=color:#666>[</span><span style=color:#666>[</span> <span style=color:#b8860b>$result</span> <span style=color:#666>=</span>~ <span style=color:#b8860b>$str2</span> <span style=color:#666>]</span><span style=color:#666>]</span>;<span style=color:#a2f;font-weight:700>then</span>
+    <span style=color:#a2f>echo</span> <span style=color:#b44>&#34;PASSED TEST TIMES:&#34;</span><span style=color:#b8860b>$i</span>
+  <span style=color:#a2f;font-weight:700>else</span>
+    <span style=color:#b8860b>success</span><span style=color:#666>=</span><span style=color:#a2f>false</span>
+    <span style=color:#a2f>echo</span> <span style=color:#b44>&#34;FAIL AT&#34;</span> <span style=color:#b8860b>$i</span> <span style=color:#b44>&#34;TIMES&#34;</span>
+    <span style=color:#a2f>break</span>
+  <span style=color:#a2f;font-weight:700>fi</span>
+<span style=color:#a2f;font-weight:700>done</span>
+
+
+<span style=color:#a2f;font-weight:700>if</span> <span style=color:#666>(</span><span style=color:#b8860b>$success</span><span style=color:#666>)</span>
+<span style=color:#a2f;font-weight:700>then</span>
+  <span style=color:#a2f>echo</span> <span style=color:#b44>&#34;PASS ALL TEST&#34;</span> <span style=color:#b8860b>$loop_time</span> <span style=color:#b44>&#34;TIMES&#34;</span>
+<span style=color:#a2f;font-weight:700>fi</span>
+</code></pre></div><h2 id=1-parta-选举>1 PartA-选举</h2><blockquote><p>PartA部分实现了选举，对应论文5.1～5.2</p></blockquote><p>除了图2，图4也是partA实现的重要依据</p><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220211165031666.png alt=image-20220211165031666></p></p><h3 id=11-测试分析>1.1 测试分析</h3><p>PartA有两个测试</p><ul><li><code>TestInitialElection2A</code><ul><li>测试是否能够正常选举，并在保持网络没有波动的情况下term不会发生变化（换言之就是需要实现简单的心跳）</li></ul></li><li><code>TestReElection2A</code><ul><li>测试在有异常的情况下选举是否正常。<ul><li>先产生一个<code>leader</code>，然后让这个<code>leader</code>离线，检查集群能否再产生一个<code>leader</code>。</li><li>令原来的<code>leader</code>上线，检查<code>leader</code>不应该发生变化。</li><li>令一个<code>leader</code>和一个<code>follower</code>离线，检查此时集群不应该再产生新<code>leader</code>。</li></ul></li></ul></li></ul><h3 id=12-定义>1.2 定义</h3><p>根据论文定义raft的变量和状态变化。为了方便debug，这里定义了一个log方法来打印日志和当前raft节点的信息。</p><p>这里需要注意的是，我们用<code>heartbeatTime</code>来代表一个raft节点上一次收到心跳的时间，用<code>electionTimeout</code>来代表随机生成的超时时间。因为在每次reset的时候，他们都需要同时被设置，所以新增了一个<code>timeMutex</code>来保证原子性。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>type</span> NodeType <span style=color:#0b0;font-weight:700>string</span>
+
+<span style=color:#a2f;font-weight:700>const</span> (
+	Follower  NodeType = <span style=color:#b44>&#34;Follower&#34;</span>
+	Candidate NodeType = <span style=color:#b44>&#34;Candidate&#34;</span>
+	Leader    NodeType = <span style=color:#b44>&#34;Leader&#34;</span>
+)
+
+<span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// A Go object implementing a single Raft peer.
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>type</span> Raft <span style=color:#a2f;font-weight:700>struct</span> {
+	mu        sync.Mutex          <span style=color:#080;font-style:italic>// Lock to protect shared access to this peer&#39;s state
+</span><span style=color:#080;font-style:italic></span>	peers     []<span style=color:#666>*</span>labrpc.ClientEnd <span style=color:#080;font-style:italic>// RPC end points of all peers
+</span><span style=color:#080;font-style:italic></span>	persister <span style=color:#666>*</span>Persister          <span style=color:#080;font-style:italic>// Object to hold this peer&#39;s persisted state
+</span><span style=color:#080;font-style:italic></span>	me        <span style=color:#0b0;font-weight:700>int</span>                 <span style=color:#080;font-style:italic>// this peer&#39;s index into peers[]
+</span><span style=color:#080;font-style:italic></span>	dead      <span style=color:#0b0;font-weight:700>int32</span>               <span style=color:#080;font-style:italic>// set by Kill()
+</span><span style=color:#080;font-style:italic></span>
+	<span style=color:#080;font-style:italic>// Your data here (2A, 2B, 2C).
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#080;font-style:italic>// Look at the paper&#39;s Figure 2 for a description of what
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#080;font-style:italic>// state a Raft server must maintain.
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#080;font-style:italic>// Persistent state on all servers
+</span><span style=color:#080;font-style:italic></span>	currentTerm <span style=color:#0b0;font-weight:700>int</span>
+	votedFor    <span style=color:#0b0;font-weight:700>int</span>
+	logs        []LogEntry
+	<span style=color:#080;font-style:italic>// Volatile state on all servers
+</span><span style=color:#080;font-style:italic></span>	committedIndex <span style=color:#0b0;font-weight:700>int</span>
+	lastApplied    <span style=color:#0b0;font-weight:700>int</span>
+	<span style=color:#080;font-style:italic>// Volatile state on leaders
+</span><span style=color:#080;font-style:italic></span>	nextIndex  []<span style=color:#0b0;font-weight:700>int</span>
+	matchIndex []<span style=color:#0b0;font-weight:700>int</span>
+	<span style=color:#080;font-style:italic>// other
+</span><span style=color:#080;font-style:italic></span>	role            NodeType
+	timeMutex       sync.Mutex
+	electionTimeout time.Duration
+	heartbeatTime   time.Time
+	applyCh         <span style=color:#a2f;font-weight:700>chan</span> ApplyMsg
+}
+
+<span style=color:#a2f;font-weight:700>type</span> LogEntry <span style=color:#a2f;font-weight:700>struct</span> {
+	Term    <span style=color:#0b0;font-weight:700>int</span>
+	Command <span style=color:#a2f;font-weight:700>interface</span>{}
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>getLastLogIndex</span>() <span style=color:#0b0;font-weight:700>int</span> {
+	<span style=color:#a2f;font-weight:700>return</span> <span style=color:#a2f>len</span>(rf.logs) <span style=color:#666>-</span> <span style=color:#666>1</span>
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>commitLogs</span>() {
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> rf.lastApplied <span style=color:#666>+</span> <span style=color:#666>1</span>; i <span style=color:#666>&lt;=</span> rf.committedIndex; i<span style=color:#666>++</span> {
+		rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;commit index=%d,command=%v&#34;</span>,i,rf.logs[i].Command)
+		rf.applyCh <span style=color:#666>&lt;-</span> ApplyMsg{CommandValid: <span style=color:#a2f;font-weight:700>true</span>, CommandIndex: i, Command: rf.logs[i].Command}
+	}
+	rf.lastApplied = rf.committedIndex
+}
+
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>updateLeaderCommittedIndex</span>() {
+	tmp <span style=color:#666>:=</span> <span style=color:#a2f>make</span>([]<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#a2f>len</span>(rf.matchIndex))
+	<span style=color:#a2f>copy</span>(tmp, rf.matchIndex)
+	sort.<span style=color:#00a000>Ints</span>(tmp)
+	index <span style=color:#666>:=</span> tmp[<span style=color:#a2f>len</span>(tmp)<span style=color:#666>/</span><span style=color:#666>2</span>]
+	<span style=color:#a2f;font-weight:700>if</span> rf.logs[index].Term <span style=color:#666>==</span> rf.currentTerm {
+		<span style=color:#080;font-style:italic>// Leader 不能提交之前任期的日志，只能通过提交自己任期的日志，从而间接提交之前任期的日志
+</span><span style=color:#080;font-style:italic></span>		<span style=color:#a2f;font-weight:700>if</span> index &gt; rf.committedIndex{
+			rf.committedIndex = tmp[<span style=color:#a2f>len</span>(tmp)<span style=color:#666>/</span><span style=color:#666>2</span>]
+			rf.<span style=color:#00a000>commitLogs</span>()
+			rf.<span style=color:#00a000>broadcast</span>()
+		}
+	}
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>convertToFollower</span>(newTerm <span style=color:#0b0;font-weight:700>int</span>) {
+	rf.currentTerm = newTerm
+	rf.votedFor = <span style=color:#666>-</span><span style=color:#666>1</span>
+	rf.role = Follower
+	rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;convert to follower&#34;</span>)
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>convertToCandidate</span>() {
+	rf.currentTerm<span style=color:#666>++</span>
+	rf.votedFor = rf.me
+	rf.role = Candidate
+	rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;convert to candidate&#34;</span>)
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>convertToLeader</span>() {
+	rf.role = Leader
+	<span style=color:#a2f;font-weight:700>for</span> j <span style=color:#666>:=</span> <span style=color:#666>0</span>; j &lt; <span style=color:#a2f>len</span>(rf.peers); j<span style=color:#666>++</span> {
+		<span style=color:#a2f;font-weight:700>if</span> j <span style=color:#666>==</span> rf.me {
+			<span style=color:#a2f;font-weight:700>continue</span>
+		}
+		rf.nextIndex[j] = rf.<span style=color:#00a000>getLastLogIndex</span>() <span style=color:#666>+</span> <span style=color:#666>1</span>
+		rf.matchIndex[j] = <span style=color:#666>0</span>
+	}
+	rf.<span style=color:#00a000>broadcast</span>()
+	rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;convert to leader,%v&#34;</span>,rf.nextIndex)
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>resetTime</span>() {
+	rf.timeMutex.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f;font-weight:700>defer</span> rf.timeMutex.<span style=color:#00a000>Unlock</span>()
+	<span style=color:#080;font-style:italic>//rf.printf(&#34;reset time&#34;)
+</span><span style=color:#080;font-style:italic></span>	rf.heartbeatTime = time.<span style=color:#00a000>Now</span>()
+	rf.electionTimeout = time.Millisecond <span style=color:#666>*</span> time.<span style=color:#00a000>Duration</span>(<span style=color:#666>250</span><span style=color:#666>+</span>rand.<span style=color:#00a000>Intn</span>(<span style=color:#666>250</span>))
+}
+
+<span style=color:#080;font-style:italic>// return currentTerm and whether this server
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// believes it is the leader.
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>GetState</span>() (<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#0b0;font-weight:700>bool</span>) {
+
+	term <span style=color:#666>:=</span> rf.currentTerm
+	isLeader <span style=color:#666>:=</span> rf.role <span style=color:#666>==</span> Leader
+	<span style=color:#080;font-style:italic>// Your code here (2A).
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>return</span> term, isLeader
+}
+</code></pre></div><p>Figure 2 提到，<strong>log 的 first index is 1</strong>，这里进行一个取巧的做法，在初始化 log 的时候先插入一条term=0的记录。基于这个规则，我定义了一个<code>getLastLogIndex</code>方法，来提高代码的可读性。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>getLastLogIndex</span>() <span style=color:#0b0;font-weight:700>int</span> {
+	<span style=color:#a2f;font-weight:700>return</span> <span style=color:#a2f>len</span>(rf.logs) <span style=color:#666>-</span> <span style=color:#666>1</span>
+}
+</code></pre></div><h3 id=13-requestvote-prc>1.3 RequestVote PRC</h3><p>RequestVote RPC 根据图2的流程书写即可。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#080;font-style:italic>// =======================================
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// RequestVote RPC
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// =======================================
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>type</span> RequestVoteArgs <span style=color:#a2f;font-weight:700>struct</span> {
+	<span style=color:#080;font-style:italic>// Your data here (2A, 2B).
+</span><span style=color:#080;font-style:italic></span>	Term         <span style=color:#0b0;font-weight:700>int</span> <span style=color:#080;font-style:italic>// candidate’s Term
+</span><span style=color:#080;font-style:italic></span>	CandidateId  <span style=color:#0b0;font-weight:700>int</span> <span style=color:#080;font-style:italic>// candidate requesting vote
+</span><span style=color:#080;font-style:italic></span>	LastLogIndex <span style=color:#0b0;font-weight:700>int</span> <span style=color:#080;font-style:italic>// index of candidate’s last log entry
+</span><span style=color:#080;font-style:italic></span>	LastLogTerm  <span style=color:#0b0;font-weight:700>int</span> <span style=color:#080;font-style:italic>// Term of candidate’s last log entry
+</span><span style=color:#080;font-style:italic></span>}
+
+<span style=color:#a2f;font-weight:700>type</span> RequestVoteReply <span style=color:#a2f;font-weight:700>struct</span> {
+	<span style=color:#080;font-style:italic>// Your data here (2A).
+</span><span style=color:#080;font-style:italic></span>	Term        <span style=color:#0b0;font-weight:700>int</span>  <span style=color:#080;font-style:italic>// currentTerm, for candidate to update itself
+</span><span style=color:#080;font-style:italic></span>	VoteGranted <span style=color:#0b0;font-weight:700>bool</span> <span style=color:#080;font-style:italic>// true means candidate received vote
+</span><span style=color:#080;font-style:italic></span>}
+
+<span style=color:#080;font-style:italic>// RequestVote RPC handler.
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>RequestVote</span>(args <span style=color:#666>*</span>RequestVoteArgs, reply <span style=color:#666>*</span>RequestVoteReply) {
+	<span style=color:#080;font-style:italic>// Your code here (2A, 2B).
+</span><span style=color:#080;font-style:italic></span>	rf.mu.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+	reply.Term = rf.currentTerm
+	<span style=color:#a2f;font-weight:700>if</span> args.Term &lt; rf.currentTerm {
+		reply.VoteGranted = <span style=color:#a2f;font-weight:700>false</span>
+		<span style=color:#a2f;font-weight:700>return</span>
+	}
+	<span style=color:#080;font-style:italic>// If RPC request or response contains term T &gt; currentTerm, set currentTerm = T, convert to follower (§5.1)
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>if</span> args.Term &gt; rf.currentTerm {
+		rf.<span style=color:#00a000>convertToFollower</span>(args.Term)
+	}
+	<span style=color:#a2f;font-weight:700>if</span> rf.votedFor <span style=color:#666>==</span> <span style=color:#666>-</span><span style=color:#666>1</span> <span style=color:#666>||</span> rf.votedFor <span style=color:#666>==</span> args.CandidateId {
+		<span style=color:#080;font-style:italic>// check log up-to-date
+</span><span style=color:#080;font-style:italic></span>		lastIndex <span style=color:#666>:=</span> rf.<span style=color:#00a000>getLastLogIndex</span>()
+		lastTerm <span style=color:#666>:=</span> rf.logs[lastIndex].Term
+		<span style=color:#a2f;font-weight:700>if</span> lastTerm &gt; args.LastLogTerm <span style=color:#666>||</span> (lastTerm <span style=color:#666>==</span> args.LastLogTerm <span style=color:#666>&amp;&amp;</span> lastIndex &gt; args.LastLogIndex) {
+			reply.VoteGranted = <span style=color:#a2f;font-weight:700>false</span>
+			<span style=color:#a2f;font-weight:700>return</span>
+		} <span style=color:#a2f;font-weight:700>else</span> {
+			rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;grand vote to %d&#34;</span>, args.CandidateId)
+			reply.VoteGranted = <span style=color:#a2f;font-weight:700>true</span>
+			rf.votedFor = args.CandidateId
+		}
+	}<span style=color:#a2f;font-weight:700>else</span>{
+		reply.VoteGranted = <span style=color:#a2f;font-weight:700>false</span>
+		<span style=color:#a2f;font-weight:700>return</span>
+	}
+	rf.<span style=color:#00a000>resetTime</span>()
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>sendRequestVote</span>(server <span style=color:#0b0;font-weight:700>int</span>, args <span style=color:#666>*</span>RequestVoteArgs, reply <span style=color:#666>*</span>RequestVoteReply) <span style=color:#0b0;font-weight:700>bool</span> {
+	ok <span style=color:#666>:=</span> rf.peers[server].<span style=color:#00a000>Call</span>(<span style=color:#b44>&#34;Raft.RequestVote&#34;</span>, args, reply)
+	<span style=color:#a2f;font-weight:700>return</span> ok
+}
+</code></pre></div><p>AppendEntriesRPC的具体实现参考PartB部分</p><h3 id=14-状态机与ticket协程>1.4 状态机与ticket协程</h3><p>根据图4的状态机，为不同的role定义不同的行为</p><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220211165031666.png alt=image-20220211165031666></p></p><p>核心逻辑为<code>ticker</code>，我们为每个raft服务在初始化时启动一个<code>ticket</code>协程</p><ul><li>如果为Leader，只需定时发送心跳即可</li><li>如果为Candidate或Follower，超时以后主动发起选举</li></ul><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>ticker</span>() {
+	<span style=color:#a2f;font-weight:700>for</span> rf.<span style=color:#00a000>killed</span>() <span style=color:#666>==</span> <span style=color:#a2f;font-weight:700>false</span> {
+		<span style=color:#a2f;font-weight:700>if</span> rf.role <span style=color:#666>==</span> Leader {
+			<span style=color:#080;font-style:italic>// TODO：发送心跳包
+</span><span style=color:#080;font-style:italic></span>		} <span style=color:#a2f;font-weight:700>else</span> {
+			time.<span style=color:#00a000>Sleep</span>(time.Millisecond <span style=color:#666>*</span> <span style=color:#666>10</span>)
+			rf.timeMutex.<span style=color:#00a000>Lock</span>()
+			<span style=color:#080;font-style:italic>// check heartbeats time
+</span><span style=color:#080;font-style:italic></span>			timeout <span style=color:#666>:=</span> time.<span style=color:#00a000>Since</span>(rf.heartbeatTime) &gt; rf.electionTimeout
+			rf.timeMutex.<span style=color:#00a000>Unlock</span>()
+			<span style=color:#a2f;font-weight:700>if</span> timeout<span style=color:#666>&amp;&amp;</span>rf.role <span style=color:#666>!=</span> Leader {
+				rf.<span style=color:#00a000>startElection</span>()
+			} <span style=color:#a2f;font-weight:700>else</span> {
+				<span style=color:#a2f;font-weight:700>continue</span>
+			}
+		}
+	}
+}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>startElection</span>() {
+	rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;start election&#34;</span>)
+	rf.mu.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+	rf.<span style=color:#00a000>convertToCandidate</span>()
+	args <span style=color:#666>:=</span> RequestVoteArgs{
+		CandidateId:  rf.me,
+		Term:         rf.currentTerm,
+		LastLogIndex: rf.<span style=color:#00a000>getLastLogIndex</span>(),
+		LastLogTerm:  rf.logs[rf.<span style=color:#00a000>getLastLogIndex</span>()].Term,
+	}
+	votedCount <span style=color:#666>:=</span> <span style=color:#666>1</span>
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#666>0</span>; i &lt; <span style=color:#a2f>len</span>(rf.peers); i<span style=color:#666>++</span> {
+		<span style=color:#a2f;font-weight:700>if</span> i <span style=color:#666>==</span> rf.me {
+			<span style=color:#080;font-style:italic>// no need to request itself
+</span><span style=color:#080;font-style:italic></span>			<span style=color:#a2f;font-weight:700>continue</span>
+		}
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>(serverNum <span style=color:#0b0;font-weight:700>int</span>, args RequestVoteArgs) {
+			reply <span style=color:#666>:=</span> RequestVoteReply{VoteGranted: <span style=color:#a2f;font-weight:700>false</span>}
+			ok <span style=color:#666>:=</span> rf.<span style=color:#00a000>sendRequestVote</span>(serverNum, <span style=color:#666>&amp;</span>args, <span style=color:#666>&amp;</span>reply)
+			<span style=color:#a2f;font-weight:700>if</span> ok <span style=color:#666>&amp;&amp;</span> args.Term<span style=color:#666>==</span>rf.currentTerm{
+				rf.mu.<span style=color:#00a000>Lock</span>()
+				<span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+				<span style=color:#a2f;font-weight:700>if</span> rf.role <span style=color:#666>==</span> Candidate <span style=color:#666>&amp;&amp;</span> reply.VoteGranted {
+					<span style=color:#080;font-style:italic>// 如果同意
+</span><span style=color:#080;font-style:italic></span>					votedCount<span style=color:#666>++</span>
+					rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;receive vote from %d&#34;</span>,serverNum)
+					<span style=color:#a2f;font-weight:700>if</span> votedCount <span style=color:#666>&gt;=</span> <span style=color:#a2f>len</span>(rf.peers)<span style=color:#666>/</span><span style=color:#666>2</span><span style=color:#666>+</span><span style=color:#666>1</span>{
+						<span style=color:#080;font-style:italic>// 当选leader
+</span><span style=color:#080;font-style:italic></span>						rf.<span style=color:#00a000>convertToLeader</span>()
+					}
+				} <span style=color:#a2f;font-weight:700>else</span> <span style=color:#a2f;font-weight:700>if</span> !reply.VoteGranted {
+					<span style=color:#080;font-style:italic>// 如果不同意
+</span><span style=color:#080;font-style:italic></span>					<span style=color:#a2f;font-weight:700>if</span> reply.Term &gt; rf.currentTerm {
+						rf.<span style=color:#00a000>convertToFollower</span>(reply.Term)
+					}
+				}
+			}
+		}(i, args)
+	}
+	rf.<span style=color:#00a000>resetTime</span>()
+}
+
+<span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// the service or tester wants to create a Raft server. the ports
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// of all the Raft servers (including this one) are in peers[]. this
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// server&#39;s port is peers[me]. all the servers&#39; peers[] arrays
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// have the same order. persister is a place for this server to
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// save its persistent state, and also initially holds the most
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// recent saved state, if any. applyCh is a channel on which the
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// tester or service expects Raft to send ApplyMsg messages.
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// Make() must return quickly, so it should start goroutines
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// for any long-running work.
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>func</span> <span style=color:#00a000>Make</span>(peers []<span style=color:#666>*</span>labrpc.ClientEnd, me <span style=color:#0b0;font-weight:700>int</span>,
+	persister <span style=color:#666>*</span>Persister, applyCh <span style=color:#a2f;font-weight:700>chan</span> ApplyMsg) <span style=color:#666>*</span>Raft {
+	rf <span style=color:#666>:=</span> <span style=color:#666>&amp;</span>Raft{}
+	rf.peers = peers
+	rf.persister = persister
+	rf.me = me
+
+	<span style=color:#080;font-style:italic>// Your initialization code here (2A, 2B, 2C).
+</span><span style=color:#080;font-style:italic></span>	rf.logs = <span style=color:#a2f>make</span>([]LogEntry, <span style=color:#666>0</span>, <span style=color:#666>0</span>)
+	rf.currentTerm = <span style=color:#666>0</span>
+	rf.votedFor = <span style=color:#666>-</span><span style=color:#666>1</span>
+	rf.committedIndex = <span style=color:#666>0</span>
+	rf.lastApplied = <span style=color:#666>0</span>
+	rf.applyCh = applyCh
+	rf.votedFor = <span style=color:#666>-</span><span style=color:#666>1</span>
+	rf.role = Follower
+	rf.<span style=color:#00a000>resetTime</span>()
+	rf.matchIndex = <span style=color:#a2f>make</span>([]<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#a2f>len</span>(peers), <span style=color:#a2f>len</span>(peers))
+	rf.nextIndex = <span style=color:#a2f>make</span>([]<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#a2f>len</span>(peers), <span style=color:#a2f>len</span>(peers))
+	rf.logs = <span style=color:#a2f>append</span>(rf.logs, LogEntry{Term: <span style=color:#666>0</span>})
+
+	<span style=color:#080;font-style:italic>// initialize from state persisted before a crash
+</span><span style=color:#080;font-style:italic></span>	rf.<span style=color:#00a000>readPersist</span>(persister.<span style=color:#00a000>ReadRaftState</span>())
+	<span style=color:#a2f;font-weight:700>go</span> rf.<span style=color:#00a000>ticker</span>()
+
+	<span style=color:#a2f;font-weight:700>return</span> rf
+}
+</code></pre></div><h3 id=15-总结>1.5 总结</h3><p>PartA的逻辑较为简单，主要难点在于重设心跳时间的实际。如果这里出现了错误，很可能出现一种活锁，例如没有leader正在被选举，或者一旦一个leader被选出来，某个其他节点又启动一轮选举，强制最近刚选出来的leader立即退位。</p><p>我在助教写的指南中明确写道，你应该<strong>仅</strong>重启你的选举定时器，如果</p><ul><li>a) 你收到一个来自<strong>当前</strong> leader的<code>AppendEntries</code> RPC(即，如果<code>AppendEntries</code>参数中的term过期了，你就<strong>不</strong> 应该重置你的定时器)；</li><li>b) 你正在开启一轮选举；</li><li>或者 c)你给另一个peer<strong>投</strong> 票。</li></ul><p>如果只实现RequestVoteRPC也可以通过测试，但是会有warming，因为没有心跳的存在，一个leader当选后其他raft节点无法感知，很快又会发起新一轮选举。</p><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220211144847861.png alt=image-20220211144847861></p></p><p>解决方案就是实现一个最基本的AppendEntriesRPC来实现心跳，具体实现将放在partB中进行。</p><h2 id=2-partb-日志复制>2 PartB-日志复制</h2><h3 id=21-测试分析>2.1 测试分析</h3><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220214213620591.png alt=image-20220214213620591></p></p><p>partB的测试用例相比partA丰富了很多，在实现的过程中通过测试用例修复了非常多bug。</p><p>其中，前几个测试的逻辑都比较简单，基本都是选主➡️提交日志➡️检查日志➡️节点失联➡️节点重连等一系列流程。</p><p>最后一个测试则是检查RPC的数量，换言之就是限制了心跳的频率，如果挂在了TestCount2B，基本只需要修改心跳频率即可。</p><h3 id=22-leader-append-日志>2.2 Leader Append 日志</h3><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>Start</span>(command <span style=color:#a2f;font-weight:700>interface</span>{}) (<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#0b0;font-weight:700>int</span>, <span style=color:#0b0;font-weight:700>bool</span>) {
+   rf.mu.<span style=color:#00a000>Lock</span>()
+   <span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+
+   <span style=color:#080;font-style:italic>// Your code here (2B).
+</span><span style=color:#080;font-style:italic></span>   <span style=color:#a2f;font-weight:700>if</span> rf.role <span style=color:#666>!=</span> Leader {
+      <span style=color:#a2f;font-weight:700>return</span> <span style=color:#666>-</span><span style=color:#666>1</span>, <span style=color:#666>-</span><span style=color:#666>1</span>, <span style=color:#a2f;font-weight:700>false</span>
+   } <span style=color:#a2f;font-weight:700>else</span> {
+      rf.logs = <span style=color:#a2f>append</span>(rf.logs, LogEntry{Term: rf.currentTerm, Command: command})
+      index <span style=color:#666>:=</span> rf.<span style=color:#00a000>getLastLogIndex</span>()
+      term <span style=color:#666>:=</span> rf.currentTerm
+      rf.matchIndex[rf.me] = index
+      rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;append new command whose index=%d, term=%d&#34;</span>, index, term)
+      rf.<span style=color:#00a000>broadcast</span>()
+      <span style=color:#a2f;font-weight:700>return</span> index, term, <span style=color:#a2f;font-weight:700>true</span>
+   }
+}
+</code></pre></div><h3 id=23-appendentries-rpc>2.3 AppendEntries RPC</h3><p>PartB主要实现就是AppendEntriesRPC，基本上只要参考论文图2的伪代码进行实现即可。</p><p>⚠️图2右下角的Rules for Servers也需要考虑！</p><p>⚠️实现的AppendEntriesRPC在图2的基础上增加了<a href=https://cpaulyz.github.io/posts/mit6.824-lecture7-raft-2/#%E5%BF%AB%E9%80%9F%E5%9B%9E%E9%80%80 target=_blank rel=noopener>快速回退技术</a></p><p>这里有个需要注意的细节是，RPC可能不是按顺序到达的，即raft server可能收到很早以前的RPC，所以一定要严格按照图2的流程。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#080;font-style:italic>// =======================================
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// AppendEntries RPC
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// =======================================
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>type</span> AppendEntriesArgs <span style=color:#a2f;font-weight:700>struct</span> {
+	Term         <span style=color:#0b0;font-weight:700>int</span>        <span style=color:#080;font-style:italic>// leader&#39;s Term
+</span><span style=color:#080;font-style:italic></span>	LeaderId     <span style=color:#0b0;font-weight:700>int</span>        <span style=color:#080;font-style:italic>// so follower can redirect clients
+</span><span style=color:#080;font-style:italic></span>	PrevLogIndex <span style=color:#0b0;font-weight:700>int</span>        <span style=color:#080;font-style:italic>// index of log entry immediately preceding
+</span><span style=color:#080;font-style:italic></span>	PrevLogTerm  <span style=color:#0b0;font-weight:700>int</span>        <span style=color:#080;font-style:italic>// Term of prevLogIndex entry
+</span><span style=color:#080;font-style:italic></span>	Entries      []LogEntry <span style=color:#080;font-style:italic>//log entries to store (empty for heartbeat; may send more than one for efficiency)
+</span><span style=color:#080;font-style:italic></span>	LeaderCommit <span style=color:#0b0;font-weight:700>int</span>        <span style=color:#080;font-style:italic>// new ones leader’s commitIndex
+</span><span style=color:#080;font-style:italic></span>
+}
+
+<span style=color:#a2f;font-weight:700>type</span> AppendEntriesReply <span style=color:#a2f;font-weight:700>struct</span> {
+	Term    <span style=color:#0b0;font-weight:700>int</span>  	<span style=color:#080;font-style:italic>// currentTerm, for leader to update itself
+</span><span style=color:#080;font-style:italic></span>	Success <span style=color:#0b0;font-weight:700>bool</span> 	<span style=color:#080;font-style:italic>// true if follower contained entry matching prevLogIndex and prevLogTerm
+</span><span style=color:#080;font-style:italic></span>  <span style=color:#080;font-style:italic>// 以下为新增字段，用于快速回退
+</span><span style=color:#080;font-style:italic></span>	XTerm	<span style=color:#0b0;font-weight:700>int</span> 	<span style=color:#080;font-style:italic>// 与Leader冲突的Log对应的任期号; 如果Follower在对应位置没有Log，那么这里会返回 -1
+</span><span style=color:#080;font-style:italic></span>	XIndex	<span style=color:#0b0;font-weight:700>int</span> 	<span style=color:#080;font-style:italic>// 对应任期号为XTerm的第一条Log条目的槽位号
+</span><span style=color:#080;font-style:italic></span>	XLen	<span style=color:#0b0;font-weight:700>int</span> 	<span style=color:#080;font-style:italic>// XLen表示Follower最后一条的Log的Index
+</span><span style=color:#080;font-style:italic></span>}
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>AppendEntries</span>(args <span style=color:#666>*</span>AppendEntriesArgs, reply <span style=color:#666>*</span>AppendEntriesReply) {
+	rf.mu.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+	<span style=color:#080;font-style:italic>// 1. Reply false if Term &lt; currentTerm
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>if</span> args.Term &lt; rf.currentTerm {
+		rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;term mismatch %d&#34;</span>,args.Term)
+		reply.Success = <span style=color:#a2f;font-weight:700>false</span>
+		reply.Term = rf.currentTerm
+		reply.XTerm = XTermNoUse
+		<span style=color:#a2f;font-weight:700>return</span>
+	}
+	rf.<span style=color:#00a000>resetTime</span>()
+	<span style=color:#080;font-style:italic>// If RPC request or response contains term T &gt; currentTerm, set currentTerm = T, convert to follower (§5.1)
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>if</span> args.Term &gt; rf.currentTerm {
+		rf.<span style=color:#00a000>convertToFollower</span>(args.Term)
+	}
+	<span style=color:#a2f;font-weight:700>if</span> rf.role<span style=color:#666>==</span>Candidate<span style=color:#666>&amp;&amp;</span>args.Term<span style=color:#666>&gt;=</span>rf.currentTerm{
+		rf.<span style=color:#00a000>convertToFollower</span>(args.Term)
+	}
+	<span style=color:#080;font-style:italic>// 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>if</span> rf.<span style=color:#00a000>getLastLogIndex</span>() &lt; args.PrevLogIndex {
+		reply.Success = <span style=color:#a2f;font-weight:700>false</span>
+		reply.Term = rf.currentTerm
+		reply.XTerm = <span style=color:#666>-</span><span style=color:#666>1</span>
+		reply.XLen = rf.<span style=color:#00a000>getLastLogIndex</span>()
+		<span style=color:#a2f;font-weight:700>return</span>
+	}<span style=color:#a2f;font-weight:700>else</span> <span style=color:#a2f;font-weight:700>if</span> rf.<span style=color:#00a000>getLastLogIndex</span>() <span style=color:#666>&gt;=</span> args.PrevLogIndex <span style=color:#666>&amp;&amp;</span> rf.logs[args.PrevLogIndex].Term <span style=color:#666>!=</span> args.PrevLogTerm{
+		reply.Success = <span style=color:#a2f;font-weight:700>false</span>
+		reply.Term = rf.currentTerm
+		reply.XTerm = rf.logs[args.PrevLogIndex].Term
+		<span style=color:#a2f;font-weight:700>for</span> i<span style=color:#666>:=</span>args.PrevLogIndex;i<span style=color:#666>&gt;=</span><span style=color:#666>0</span><span style=color:#666>&amp;&amp;</span>rf.logs[i].Term<span style=color:#666>==</span>reply.XTerm;i<span style=color:#666>--</span>{
+			reply.XIndex = i
+		}
+		<span style=color:#a2f;font-weight:700>return</span>
+	}
+	<span style=color:#080;font-style:italic>// 3. If an existing entry conflicts with a new one (same index but different terms),
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#080;font-style:italic>//    delete the existing entry and all that follow it
+</span><span style=color:#080;font-style:italic></span>	startAppendIndex <span style=color:#666>:=</span> <span style=color:#666>0</span>
+	<span style=color:#a2f;font-weight:700>for</span> ; startAppendIndex&lt;<span style=color:#a2f>len</span>(args.Entries)<span style=color:#666>&amp;&amp;</span>args.PrevLogIndex<span style=color:#666>+</span><span style=color:#666>1</span><span style=color:#666>+</span>startAppendIndex&lt;<span style=color:#a2f>len</span>(rf.logs); startAppendIndex<span style=color:#666>++</span>{
+		<span style=color:#a2f;font-weight:700>if</span> rf.logs[args.PrevLogIndex<span style=color:#666>+</span><span style=color:#666>1</span><span style=color:#666>+</span>startAppendIndex].Term<span style=color:#666>!=</span>args.Entries[startAppendIndex].Term{
+			rf.logs = rf.logs[:args.PrevLogIndex<span style=color:#666>+</span><span style=color:#666>1</span><span style=color:#666>+</span>startAppendIndex]
+			<span style=color:#a2f;font-weight:700>break</span>
+		}
+	}
+	<span style=color:#080;font-style:italic>// 4. Append any new entries not already in the log
+</span><span style=color:#080;font-style:italic></span>	rf.logs = <span style=color:#a2f>append</span>(rf.logs, args.Entries[startAppendIndex:]<span style=color:#666>...</span>)
+	<span style=color:#080;font-style:italic>// 5. If leaderCommit &gt; commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>if</span> args.LeaderCommit &gt; rf.committedIndex {
+		<span style=color:#a2f;font-weight:700>if</span> args.LeaderCommit <span style=color:#666>&lt;=</span> rf.<span style=color:#00a000>getLastLogIndex</span>() {
+			rf.committedIndex = args.LeaderCommit
+		} <span style=color:#a2f;font-weight:700>else</span> {
+			rf.committedIndex = rf.<span style=color:#00a000>getLastLogIndex</span>()
+		}
+		rf.<span style=color:#00a000>commitLogs</span>()
+	}
+	rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;append entries, last index=%d, last term=%d&#34;</span>,rf.<span style=color:#00a000>getLastLogIndex</span>(),rf.logs[rf.<span style=color:#00a000>getLastLogIndex</span>()].Term)
+	reply.Term = rf.currentTerm
+	reply.Success = <span style=color:#a2f;font-weight:700>true</span>
+	rf.<span style=color:#00a000>resetTime</span>()
+}
+</code></pre></div><h3 id=24-广播>2.4 广播</h3><p>AppendEntries RPC用于<strong>心跳</strong>和<strong>日志复制</strong>。实际上，心跳可以看作是定时发送的AppendEntriesRPC，不需要特殊考虑，只需要在Raft Server的ticket协程中每隔一段时间进行一次广播即可。因此，我们实现一个broadcast方法作为Raft向其他节点群发AppendEntriesRPC的入口。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>broadcast</span>() {
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> <span style=color:#a2f;font-weight:700>range</span> rf.peers {
+		<span style=color:#a2f;font-weight:700>if</span> i<span style=color:#666>==</span>rf.me{
+			<span style=color:#a2f;font-weight:700>continue</span>
+		}
+		<span style=color:#080;font-style:italic>// send heartbeat
+</span><span style=color:#080;font-style:italic></span>		args <span style=color:#666>:=</span> AppendEntriesArgs{
+			Term:         rf.currentTerm,
+			LeaderId:     rf.me,
+			LeaderCommit: rf.committedIndex,
+		}
+		args.PrevLogIndex = rf.nextIndex[i] <span style=color:#666>-</span> <span style=color:#666>1</span>
+		args.PrevLogTerm = rf.logs[args.PrevLogIndex].Term
+		<span style=color:#a2f;font-weight:700>if</span> rf.nextIndex[i] &lt; <span style=color:#a2f>len</span>(rf.logs) {
+			args.Entries = rf.logs[rf.nextIndex[i]:]
+		}
+		<span style=color:#a2f;font-weight:700>go</span> <span style=color:#a2f;font-weight:700>func</span>(serverNum <span style=color:#0b0;font-weight:700>int</span>, args AppendEntriesArgs) {
+			reply <span style=color:#666>:=</span> AppendEntriesReply{}
+			ok <span style=color:#666>:=</span> rf.<span style=color:#00a000>sendAppendEntries</span>(serverNum, <span style=color:#666>&amp;</span>args, <span style=color:#666>&amp;</span>reply)
+			<span style=color:#a2f;font-weight:700>if</span> ok {
+				rf.mu.<span style=color:#00a000>Lock</span>()
+				<span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+				<span style=color:#a2f;font-weight:700>if</span> reply.Term &gt; rf.currentTerm {
+					rf.<span style=color:#00a000>convertToFollower</span>(reply.Term)
+					<span style=color:#a2f;font-weight:700>return</span>
+				}
+				<span style=color:#a2f;font-weight:700>if</span> rf.role<span style=color:#666>!=</span>Leader{
+					<span style=color:#a2f;font-weight:700>return</span>
+				}
+				<span style=color:#a2f;font-weight:700>if</span> !reply.Success {
+					<span style=color:#080;font-style:italic>// 这里如果使用默认的回退策略，不能直接--，否则如果两个heartbeat一起返回，会-2，跳过了正常的。
+</span><span style=color:#080;font-style:italic></span>					<span style=color:#080;font-style:italic>//rf.nextIndex[serverNum] = args.PrevLogIndex
+</span><span style=color:#080;font-style:italic></span>					<span style=color:#080;font-style:italic>// 快速回退
+</span><span style=color:#080;font-style:italic></span>					rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;broadcast receive fail, XTerm=%d, XLen=%d, XIndex=%d&#34;</span>,reply.XTerm,reply.XLen,reply.XIndex)
+					<span style=color:#a2f;font-weight:700>if</span> reply.XTerm<span style=color:#666>==</span><span style=color:#666>-</span><span style=color:#666>1</span>{
+						rf.nextIndex[serverNum] = reply.XLen<span style=color:#666>+</span><span style=color:#666>1</span>
+					}<span style=color:#a2f;font-weight:700>else</span> <span style=color:#a2f;font-weight:700>if</span> reply.XTerm<span style=color:#666>!=</span>XTermNoUse{
+						<span style=color:#a2f;font-weight:700>if</span> rf.logs[reply.XIndex].Term<span style=color:#666>==</span>reply.Term{
+							rf.nextIndex[serverNum] = reply.XIndex<span style=color:#666>+</span><span style=color:#666>1</span>
+						}<span style=color:#a2f;font-weight:700>else</span>{
+							rf.nextIndex[serverNum] = reply.XIndex
+						}
+					}
+					rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;update nextIndex %v&#34;</span>,rf.nextIndex)
+				}
+				<span style=color:#a2f;font-weight:700>if</span> reply.Success {
+					rf.matchIndex[serverNum] = args.PrevLogIndex <span style=color:#666>+</span> <span style=color:#a2f>len</span>(args.Entries)
+					rf.nextIndex[serverNum] = rf.matchIndex[serverNum]<span style=color:#666>+</span><span style=color:#666>1</span>
+					rf.<span style=color:#00a000>updateLeaderCommittedIndex</span>()
+				}
+			}
+		}(i, args)
+	}
+}
+
+
+<span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>ticker</span>() {
+	<span style=color:#a2f;font-weight:700>for</span> rf.<span style=color:#00a000>killed</span>() <span style=color:#666>==</span> <span style=color:#a2f;font-weight:700>false</span> {
+		<span style=color:#a2f;font-weight:700>if</span> rf.role <span style=color:#666>==</span> Leader {
+			rf.<span style=color:#00a000>broadcast</span>()
+			time.<span style=color:#00a000>Sleep</span>(time.Millisecond <span style=color:#666>*</span> <span style=color:#666>50</span>)
+		} <span style=color:#a2f;font-weight:700>else</span> {
+			time.<span style=color:#00a000>Sleep</span>(time.Millisecond <span style=color:#666>*</span> <span style=color:#666>10</span>)
+			rf.timeMutex.<span style=color:#00a000>Lock</span>()
+			<span style=color:#080;font-style:italic>// check heartbeats time
+</span><span style=color:#080;font-style:italic></span>			timeout <span style=color:#666>:=</span> time.<span style=color:#00a000>Since</span>(rf.heartbeatTime) &gt; rf.electionTimeout
+			rf.timeMutex.<span style=color:#00a000>Unlock</span>()
+			<span style=color:#a2f;font-weight:700>if</span> timeout<span style=color:#666>&amp;&amp;</span>rf.role <span style=color:#666>!=</span> Leader {
+				rf.<span style=color:#00a000>startElection</span>()
+			} <span style=color:#a2f;font-weight:700>else</span> {
+				<span style=color:#a2f;font-weight:700>continue</span>
+			}
+		}
+	}
+}
+</code></pre></div><h3 id=25-日志提交>2.5 日志提交</h3><p>commitLogs供Leader和Follower来提交日志。Follower提交日志的规则很简单，只需要根据接收到的AppendEntires RPC中的LeaderCommit参数进行commit即可。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>commitLogs</span>() {
+	<span style=color:#a2f;font-weight:700>for</span> i <span style=color:#666>:=</span> rf.lastApplied <span style=color:#666>+</span> <span style=color:#666>1</span>; i <span style=color:#666>&lt;=</span> rf.committedIndex; i<span style=color:#666>++</span> {
+		rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;commit index=%d,command=%v&#34;</span>,i,rf.logs[i].Command)
+		rf.applyCh <span style=color:#666>&lt;-</span> ApplyMsg{CommandValid: <span style=color:#a2f;font-weight:700>true</span>, CommandIndex: i, Command: rf.logs[i].Command}
+	}
+	rf.lastApplied = rf.committedIndex
+}
+</code></pre></div><p>Leader根据matchIndex来决定提交哪些日志，只需超过半数的节点matchIndex>N，且term(N)=currentTerm，就可以提交日志。实现上可以直接对matchIndex排序来找到最大可提交的committedIndex。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>updateLeaderCommittedIndex</span>() {
+	tmp <span style=color:#666>:=</span> <span style=color:#a2f>make</span>([]<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#a2f>len</span>(rf.matchIndex))
+	<span style=color:#a2f>copy</span>(tmp, rf.matchIndex)
+	sort.<span style=color:#00a000>Ints</span>(tmp)
+	index <span style=color:#666>:=</span> tmp[<span style=color:#a2f>len</span>(tmp)<span style=color:#666>/</span><span style=color:#666>2</span>]
+	<span style=color:#a2f;font-weight:700>if</span> rf.logs[index].Term <span style=color:#666>==</span> rf.currentTerm {
+		<span style=color:#080;font-style:italic>// Leader 不能提交之前任期的日志，只能通过提交自己任期的日志，从而间接提交之前任期的日志
+</span><span style=color:#080;font-style:italic></span>		<span style=color:#a2f;font-weight:700>if</span> index &gt; rf.committedIndex{
+			rf.committedIndex = tmp[<span style=color:#a2f>len</span>(tmp)<span style=color:#666>/</span><span style=color:#666>2</span>]
+			rf.<span style=color:#00a000>commitLogs</span>()
+			rf.<span style=color:#00a000>broadcast</span>()
+		}
+	}
+}
+</code></pre></div><h3 id=26-测试踩坑优化总结>2.6 测试踩坑&优化&总结</h3><p>PartB的实现有很多可优化点，上述代码为优化后的代码，但仍有很多可优化之处，后续进行改进。</p><blockquote><p>测试方法为执行<code> time go test -run 2B</code>，具体参考实验手册</p></blockquote><h4 id=踩坑心跳间隔>踩坑：心跳间隔</h4><p>理论上，一定程度上心跳间隔越短，性能应该是越好的。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>ticker</span>() {
+	<span style=color:#a2f;font-weight:700>for</span> rf.<span style=color:#00a000>killed</span>() <span style=color:#666>==</span> <span style=color:#a2f;font-weight:700>false</span> {
+		<span style=color:#a2f;font-weight:700>if</span> rf.role <span style=color:#666>==</span> Leader {
+			rf.<span style=color:#00a000>broadcast</span>()
+			time.<span style=color:#00a000>Sleep</span>(time.Millisecond <span style=color:#666>*</span> <span style=color:#666>150</span>) <span style=color:#080;font-style:italic>// modify here
+</span><span style=color:#080;font-style:italic></span>		} <span style=color:#a2f;font-weight:700>else</span> {
+			time.<span style=color:#00a000>Sleep</span>(time.Millisecond <span style=color:#666>*</span> <span style=color:#666>10</span>)
+			rf.timeMutex.<span style=color:#00a000>Lock</span>()
+			<span style=color:#080;font-style:italic>// check heartbeats time
+</span><span style=color:#080;font-style:italic></span>			timeout <span style=color:#666>:=</span> time.<span style=color:#00a000>Since</span>(rf.heartbeatTime) &gt; rf.electionTimeout
+			rf.timeMutex.<span style=color:#00a000>Unlock</span>()
+			<span style=color:#a2f;font-weight:700>if</span> timeout<span style=color:#666>&amp;&amp;</span>rf.role <span style=color:#666>!=</span> Leader {
+				rf.<span style=color:#00a000>startElection</span>()
+			} <span style=color:#a2f;font-weight:700>else</span> {
+				<span style=color:#a2f;font-weight:700>continue</span>
+			}
+		}
+	}
+}
+</code></pre></div><p>一开始，我尝试将心跳间隔缩短到50ms，能够大幅缩短测试时间，且测试大概率能过通过。但在大量测试下，有小概率情况会无法通过<code>TestCount2B</code>。</p><p>Lab实验手册中写到，<code>Because the tester limits you to 10 heartbeats per second</code>，理想的间隔应为100ms。但考虑到除心跳外还可能有其他RPC，所以一个比较合适的时间间隔应为150ms，为了保证在electionTime内收到心跳，需要相应更改心跳超时为250～500ms随机（论文为150～300ms随机）。</p><h4 id=优化一leader-append日志后立即进行一次广播>优化一：Leader append日志后立即进行一次广播</h4><blockquote><p>上述代码皆为优化后的代码，此处仅为优化过程复盘。</p></blockquote><p>实验手册中提到，<code>If your solution uses much more than a minute of real time for the 2B tests, or much more than 5 seconds of CPU time, you may run into trouble later on</code>.</p><p>未优化之前，运行时间不符合要求。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback>Test (2B): basic agreement ...
+  ... Passed --   1.2  3   18    5106    3
+Test (2B): RPC byte count ...
+  ... Passed --   3.5  3   48  114394   11
+Test (2B): agreement despite follower disconnection ...
+  ... Passed --   6.5  3  106   27894    8
+Test (2B): no agreement if too many followers disconnect ...
+  ... Passed --   3.7  5  180   35602    3
+Test (2B): concurrent Start()s ...
+  ... Passed --   0.8  3   12    3406    6
+Test (2B): rejoin of partitioned leader ...
+  ... Passed --   6.8  3  146   36354    4
+Test (2B): leader backs up quickly over incorrect follower logs ...
+  ... Passed --  48.5  5 2876 2063884  106
+Test (2B): RPC counts aren&#39;t too high ...
+  ... Passed --   2.3  3   32    9552   12
+PASS
+ok      _/Users/chenyanze/projects/GoProjects/MIT6.824/lab/6.824/src/raft       76.934s
+go test -run 2B  1.49s user 0.80s system 2% cpu 1:17.11 total
+</code></pre></div><p>考虑到Leader append日志后，如果不立即发送广播，将会等到下次发送心跳的时候一并发送。<code>Start()</code>方法为Leader append日志到Leader发送心跳的这段时间实际上是浪费的，因此可以考虑在<code>Start()</code>方法为Leader append日志后立即发送一轮广播。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>Start</span>(command <span style=color:#a2f;font-weight:700>interface</span>{}) (<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#0b0;font-weight:700>int</span>, <span style=color:#0b0;font-weight:700>bool</span>) {
+	rf.mu.<span style=color:#00a000>Lock</span>()
+	<span style=color:#a2f;font-weight:700>defer</span> rf.mu.<span style=color:#00a000>Unlock</span>()
+
+	<span style=color:#080;font-style:italic>// Your code here (2B).
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#a2f;font-weight:700>if</span> rf.role <span style=color:#666>!=</span> Leader {
+		<span style=color:#a2f;font-weight:700>return</span> <span style=color:#666>-</span><span style=color:#666>1</span>, <span style=color:#666>-</span><span style=color:#666>1</span>, <span style=color:#a2f;font-weight:700>false</span>
+	} <span style=color:#a2f;font-weight:700>else</span> {
+		rf.logs = <span style=color:#a2f>append</span>(rf.logs, LogEntry{Term: rf.currentTerm, Command: command})
+		index <span style=color:#666>:=</span> rf.<span style=color:#00a000>getLastLogIndex</span>()
+		term <span style=color:#666>:=</span> rf.currentTerm
+		rf.matchIndex[rf.me] = index
+		rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;append new command whose index=%d, term=%d&#34;</span>, index, term)
+		rf.<span style=color:#00a000>broadcast</span>() <span style=color:#080;font-style:italic>// 立即发送广播
+</span><span style=color:#080;font-style:italic></span>		<span style=color:#a2f;font-weight:700>return</span> index, term, <span style=color:#a2f;font-weight:700>true</span>
+	}
+}
+</code></pre></div><p>优化后，测试时间显著变短！😄</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback>Test (2B): basic agreement ...
+  ... Passed --   0.7  3   18    5142    3
+Test (2B): RPC byte count ...
+  ... Passed --   1.9  3   50  114974   11
+Test (2B): agreement despite follower disconnection ...
+  ... Passed --   4.2  3   86   22751    7
+Test (2B): no agreement if too many followers disconnect ...
+  ... Passed --   3.6  5  200   40336    3
+Test (2B): concurrent Start()s ...
+  ... Passed --   0.5  3   22    6754    6
+Test (2B): rejoin of partitioned leader ...
+  ... Passed --   4.1  3  112   26377    4
+Test (2B): leader backs up quickly over incorrect follower logs ...
+  ... Passed --  33.6  5 2736 2024142  107
+Test (2B): RPC counts aren&#39;t too high ...
+  ... Passed --   2.1  3   52   17508   12
+PASS
+ok      _/Users/chenyanze/projects/GoProjects/MIT6.824/lab/6.824/src/raft       50.837s
+go test -run 2B  1.44s user 0.66s system 4% cpu 51.103 total
+</code></pre></div><h4 id=优化二leader-commit日志后立即进行一次广播>优化二：Leader commit日志后立即进行一次广播</h4><p>有了上述经验，我再次考虑到，Leader commit一条日志后，实际上也要等到下次发送心跳的时候才会告知其他Follower节点，Follower节点才会提交。也就是说，Leader commit日志到Leader发送心跳的这段时间内，Follower节点是无法感知到最新日志的提交的。</p><p>在实际的生产中，这个点应该是没有影响的，因为一旦Leader commit后，Leader可以立即反馈给client。但在Lab中，测试用例会对所有节点的commit情况进行检查。因此，可以考虑在这里进行一次优化。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>updateLeaderCommittedIndex</span>() {
+	tmp <span style=color:#666>:=</span> <span style=color:#a2f>make</span>([]<span style=color:#0b0;font-weight:700>int</span>, <span style=color:#a2f>len</span>(rf.matchIndex))
+	<span style=color:#a2f>copy</span>(tmp, rf.matchIndex)
+	sort.<span style=color:#00a000>Ints</span>(tmp)
+	index <span style=color:#666>:=</span> tmp[<span style=color:#a2f>len</span>(tmp)<span style=color:#666>/</span><span style=color:#666>2</span>]
+	<span style=color:#a2f;font-weight:700>if</span> rf.logs[index].Term <span style=color:#666>==</span> rf.currentTerm {
+		<span style=color:#080;font-style:italic>// Leader 不能提交之前任期的日志，只能通过提交自己任期的日志，从而间接提交之前任期的日志
+</span><span style=color:#080;font-style:italic></span>		<span style=color:#a2f;font-weight:700>if</span> index &gt; rf.committedIndex{
+			rf.committedIndex = tmp[<span style=color:#a2f>len</span>(tmp)<span style=color:#666>/</span><span style=color:#666>2</span>]
+			rf.<span style=color:#00a000>commitLogs</span>()
+			rf.<span style=color:#00a000>broadcast</span>() <span style=color:#080;font-style:italic>// 立即发送广播
+</span><span style=color:#080;font-style:italic></span>		}
+	}
+}
+</code></pre></div><p>优化后，测试时间再一次变短！😄</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback>Test (2B): basic agreement ...
+  ... Passed --   0.3  3   18    5185    3
+Test (2B): RPC byte count ...
+  ... Passed --   0.6  3   54  166125   11
+Test (2B): agreement despite follower disconnection ...
+  ... Passed --   3.8  3   90   24183    7
+Test (2B): no agreement if too many followers disconnect ...
+  ... Passed --   3.3  5  200   41302    4
+Test (2B): concurrent Start()s ...
+  ... Passed --   0.6  3   28    8576    6
+Test (2B): rejoin of partitioned leader ...
+  ... Passed --   5.6  3  146   36798    4
+Test (2B): leader backs up quickly over incorrect follower logs ...
+  ... Passed --  19.2  5 2224 1544358  106
+Test (2B): RPC counts aren&#39;t too high ...
+  ... Passed --   2.2  3   58   19778   12
+PASS
+ok      _/Users/chenyanze/projects/GoProjects/MIT6.824/lab/6.824/src/raft       38.641s
+go test -run 2B  1.31s user 0.56s system 4% cpu 38.904 total
+</code></pre></div><h4 id=优化三快速回退>优化三：快速回退</h4><p>在视频中，Morris教授提到了<a href=https://cpaulyz.github.io/posts/mit6.824-lecture7-raft-2/#%E5%BF%AB%E9%80%9F%E5%9B%9E%E9%80%80 target=_blank rel=noopener>“快速回退nextIndex”技术</a>，可以更快地定位到正确的nextIndex。</p><p>在测试中，我发现如果不使用快速回退技术，会有极少数情况（大概每60次测试出现一次）无法通过用例<code>TestBackup2B</code>。</p><p>原因在于最原始的策略为每次AppendEntires失败就将nextIndex-1，这有时候需要大量的RPC用于回退nextIndex，而nextIndex每次回退以后又需要等待下一次广播（或许是心跳触发，或许是其他触发）才能进行AppendEntriesRPC的尝试。</p><p>使用快速回退技术以后，测试时间再一次变短，且测试300+次均PASS！😄</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback>Test (2B): basic agreement ...
+  ... Passed --   0.4  3   18    5185    3
+Test (2B): RPC byte count ...
+  ... Passed --   0.5  3   52  165807   11
+Test (2B): agreement despite follower disconnection ...
+  ... Passed --   3.0  3   78   20936    7
+Test (2B): no agreement if too many followers disconnect ...
+  ... Passed --   3.3  5  200   40556    4
+Test (2B): concurrent Start()s ...
+  ... Passed --   0.5  3   30    9180    6
+Test (2B): rejoin of partitioned leader ...
+  ... Passed --   3.6  3  116   28146    4
+Test (2B): leader backs up quickly over incorrect follower logs ...
+  ... Passed --   6.7  5 1652 1104607  102
+Test (2B): RPC counts aren&#39;t too high ...
+  ... Passed --   2.2  3   58   20009   12
+PASS
+ok      _/Users/chenyanze/projects/GoProjects/MIT6.824/lab/6.824/src/raft       21.104s
+go test -run 2B  1.05s user 0.43s system 6% cpu 21.366 total
+</code></pre></div><h4 id=未优化>未优化</h4><p>还有可优化点在PartB中未实现：</p><ul><li>我对每个AppendEntriesRPC的参数都带上了LogEntries。实际上，如果Leader对某个Follower的nextIndex不是正确的，AppendEntriesRPC会返回false，此时RPC所携带的LogEntries数据会浪费很多网络资源，这里可以优化默认不带LogEntries，如果返回true，再立即重发一个带LogEntries的AppendEntriesRPC。</li><li>预投票，防止网络分区下term暴增。</li></ul><h4 id=总结>总结</h4><p>至此，PartB结束。</p><p>经过300+次测试均PASS，测试耗时约20s+(小于实验手册中要求的1min)，CPU用时约0.4s+(小于实验手册中要求的5s)！</p><h2 id=3-partc-持久化>3 PartC-持久化</h2><p>part c 中只需实现 <code>persist</code>和<code>readPersist</code>，并在正确的位置进行持久化即可。</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// save Raft&#39;s persistent state to stable storage,
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// where it can later be retrieved after a crash and restart.
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// see paper&#39;s Figure 2 for a description of what should be persistent.
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>persist</span>() {
+	<span style=color:#080;font-style:italic>// Your code here (2C).
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#080;font-style:italic>// Example:
+</span><span style=color:#080;font-style:italic></span>	w <span style=color:#666>:=</span> <span style=color:#a2f>new</span>(bytes.Buffer)
+	e <span style=color:#666>:=</span> labgob.<span style=color:#00a000>NewEncoder</span>(w)
+	e.<span style=color:#00a000>Encode</span>(rf.currentTerm)
+	e.<span style=color:#00a000>Encode</span>(rf.votedFor)
+	e.<span style=color:#00a000>Encode</span>(rf.logs)
+	data <span style=color:#666>:=</span> w.<span style=color:#00a000>Bytes</span>()
+	rf.persister.<span style=color:#00a000>SaveRaftState</span>(data)
+}
+
+<span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>// restore previously persisted state.
+</span><span style=color:#080;font-style:italic></span><span style=color:#080;font-style:italic>//
+</span><span style=color:#080;font-style:italic></span><span style=color:#a2f;font-weight:700>func</span> (rf <span style=color:#666>*</span>Raft) <span style=color:#00a000>readPersist</span>(data []<span style=color:#0b0;font-weight:700>byte</span>) {
+	<span style=color:#a2f;font-weight:700>if</span> data <span style=color:#666>==</span> <span style=color:#a2f;font-weight:700>nil</span> <span style=color:#666>||</span> <span style=color:#a2f>len</span>(data) &lt; <span style=color:#666>1</span> { <span style=color:#080;font-style:italic>// bootstrap without any state?
+</span><span style=color:#080;font-style:italic></span>		<span style=color:#a2f;font-weight:700>return</span>
+	}
+	<span style=color:#080;font-style:italic>// Your code here (2C).
+</span><span style=color:#080;font-style:italic></span>	<span style=color:#080;font-style:italic>// Example:
+</span><span style=color:#080;font-style:italic></span>	r <span style=color:#666>:=</span> bytes.<span style=color:#00a000>NewBuffer</span>(data)
+	d <span style=color:#666>:=</span> labgob.<span style=color:#00a000>NewDecoder</span>(r)
+	<span style=color:#a2f;font-weight:700>var</span> currentTerm <span style=color:#0b0;font-weight:700>int</span>
+	<span style=color:#a2f;font-weight:700>var</span> votedFor <span style=color:#0b0;font-weight:700>int</span>
+	<span style=color:#a2f;font-weight:700>var</span> logs []LogEntry
+	<span style=color:#a2f;font-weight:700>if</span> d.<span style=color:#00a000>Decode</span>(<span style=color:#666>&amp;</span>currentTerm) <span style=color:#666>!=</span> <span style=color:#a2f;font-weight:700>nil</span> <span style=color:#666>||</span>
+		d.<span style=color:#00a000>Decode</span>(<span style=color:#666>&amp;</span>votedFor) <span style=color:#666>!=</span> <span style=color:#a2f;font-weight:700>nil</span> <span style=color:#666>||</span>
+		d.<span style=color:#00a000>Decode</span>(<span style=color:#666>&amp;</span>logs) <span style=color:#666>!=</span> <span style=color:#a2f;font-weight:700>nil</span> {
+		rf.<span style=color:#00a000>printf</span>(<span style=color:#b44>&#34;error decode &#34;</span>)
+	} <span style=color:#a2f;font-weight:700>else</span> {
+	  rf.currentTerm = currentTerm
+	  rf.votedFor = votedFor
+	  rf.logs = logs
+	}
+}
+</code></pre></div><p>难点在于，PartC的测试十分复杂，可能发现前面隐藏的bug。</p><h2 id=总结-1>总结</h2><p>经过一周多的努力，实现了整个lab2，经过300+次的测试均无bug。</p><p>在调试的过程中，很多bug都是需要测试数十次才能复现。而每次测试需要两分多种，因此在测试上花费了大量的实现。复盘来看，遇到的bug主要和<strong>term混淆</strong>、<strong>选举超时设置时间相关</strong>，或是<strong>没有完全按照figure2的流程</strong>来实现，这些错误实际上都可以在助教写的手册中找到（中文翻译：https://zhuanlan.zhihu.com/p/203279804）。</p><p>最后附上一张测试通过的截图，整个测试流程花费了近15个小时。</p><p><p class=markdown-image><img src=https://cyzblog.oss-cn-beijing.aliyuncs.com/macimg/image-20220228161720024.png alt=image-20220228161720024></p></p></div><div class=tags><a href=tags/mit6.824>MIT6.824</a>
+<a href=tags/distributed-system>distributed system</a></div></section></main><footer id=footer><div id=social><a class=symbol href=https://github.com/Cpaulyz rel=me target=_blank><svg fill="#bbb" width="28" height="28" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><title>Github</title><desc>Created with Sketch.</desc><defs/><g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"><g id="Social-Icons---Rounded-Black" transform="translate(-264.000000, -939.000000)"><g id="Github" transform="translate(264.000000, 939.000000)"><path d="M8 72H64C68.418278 72 72 68.418278 72 64V8c0-4.418278-3.581721999999999-8-8-8H8c-4.418278 811624501e-24-8 3.581722-8 8V64C541083001e-24 68.418278 3.581722 72 8 72z" id="Rounded" fill="#bbb"/><path d="M35.9985 13C22.746 13 12 23.7870921 12 37.096644 12 47.7406712 18.876 56.7718301 28.4145 59.9584121 29.6145 60.1797862 30.0525 59.4358488 30.0525 58.7973276 30.0525 58.2250681 30.0315 56.7100863 30.0195 54.6996482 23.343 56.1558981 21.9345 51.4693938 21.9345 51.4693938 20.844 48.6864054 19.2705 47.9454799 19.2705 47.9454799 17.091 46.4500754 19.4355 46.4801943 19.4355 46.4801943 21.843 46.6503662 23.1105 48.9634994 23.1105 48.9634994 25.2525 52.6455377 28.728 51.5823398 30.096 50.9649018 30.3135 49.4077535 30.9345 48.3460615 31.62 47.7436831 26.2905 47.1352808 20.688 45.0691228 20.688 35.8361671 20.688 33.2052792 21.6225 31.0547881 23.1585 29.3696344 22.911 28.7597262 22.0875 26.3110578 23.3925 22.9934585 23.3925 22.9934585 25.4085 22.3459017 29.9925 25.4632101 31.908 24.9285993 33.96 24.6620468 36.0015 24.6515052 38.04 24.6620468 40.0935 24.9285993 42.0105 25.4632101 46.5915 22.3459017 48.603 22.9934585 48.603 22.9934585 49.9125 26.3110578 49.089 28.7597262 48.8415 29.3696344 50.3805 31.0547881 51.309 33.2052792 51.309 35.8361671 51.309 45.0917119 45.6975 47.1292571 40.3515 47.7256117 41.2125 48.4695491 41.9805 49.9393525 41.9805 52.1877301 41.9805 55.4089489 41.9505 58.0067059 41.9505 58.7973276 41.9505 59.4418726 42.3825 60.1918338 43.6005 59.9554002 53.13 56.7627944 60 47.7376593 60 37.096644 60 23.7870921 49.254 13 35.9985 13" fill="#fff"/></g></g></g></svg></a></div><div class=copyright>© Copyright
+2022
+<span class=split><svg fill="#bbb" width="15" height="15" id="heart-15" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 15 15"><path d="M13.91 6.75c-1.17 2.25-4.3 5.31-6.07 6.94-.1903.1718-.4797.1718-.67.0C5.39 12.06 2.26 9 1.09 6.75-1.48 1.8 5-1.5 7.5 3.45 10-1.5 16.48 1.8 13.91 6.75z"/></svg></span>cpaulyz</div><div class=powerby>Powered by <a href=http://www.gohugo.io/>Hugo</a> Theme By <a href=https://github.com/nodejh/hugo-theme-cactus-plus>nodejh</a></div></footer></body></html>
